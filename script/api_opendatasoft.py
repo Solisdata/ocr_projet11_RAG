@@ -2,9 +2,8 @@
 
 import requests
 import pandas as pd
-import os
 from datetime import datetime, timedelta
-from config import GEO_CITY, HISTORY_DAYS, OPENDATASOFT_API_URL
+from config import DATA_PATH, GEO_CITY, HISTORY_DAYS, OPENDATASOFT_API_URL
 
 
 #api_key = os.environ.get("API_KEY") -- API publique, pas besoin d'authentification pour accéder aux données publiques.
@@ -72,6 +71,6 @@ print(f"Date de début de l'historique : {start_date_filter}")
 print(f"Total récupéré : {len(df)} événements")
 print(df.head())
 
-df.to_csv("../data/evenements_nantes.csv", index=False, encoding="utf-8-sig")
+df.to_csv(DATA_PATH, index=False, encoding="utf-8-sig")
 
 print("Fichier CSV sauvegardé !")

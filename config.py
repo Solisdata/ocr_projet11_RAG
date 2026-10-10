@@ -17,3 +17,11 @@ OPENDATASOFT_API_URL = (
 )
 
 #API_KEY = os.getenv("API_KEY", "").strip()  # API publique, pas besoin d'authentification pour accéder aux données publiques.
+
+
+#chemin sauvegarde CSV
+DATA_PATH = (
+    Path(__file__).resolve().parent
+    / "data"
+    / "evenements_nantes.csv"
+)
