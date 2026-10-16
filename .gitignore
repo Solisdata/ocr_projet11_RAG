@@ -7,3 +7,7 @@ venv/
 
 # Cache Python
 __pycache__/
+
+
+# GEMINI CLI
+GEMINI.md

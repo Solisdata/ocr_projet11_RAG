@@ -25,3 +25,9 @@ DATA_PATH = (
     / "data"
     / "evenements_nantes.csv"
 )
+
+CLEANED_DATA_PATH = (
+    Path(__file__).resolve().parent
+    / "data"
+    / "evenements_nantes_clean.csv"
+)

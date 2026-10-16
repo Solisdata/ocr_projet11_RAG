@@ -1,3 +1,5 @@
+
+#lancer le script : python -m script.api_opendatasoft
 # je réécupère des événements culturels, les lieux, des dates, des descriptions.
 
 import requests
@@ -38,7 +40,9 @@ while offset < 10000:
         "offset": offset,
         "where": where_clause,
         "order_by": "lastdate_end ASC",
+        "select": "title_fr,description_fr,conditions_fr,location_name,location_address,location_city,firstdate_begin,lastdate_end,canonicalurl,uid"
     }
+    #j'ai selectionner les chamts qui m'intéressent avec la where clause
 
     response = requests.get(
         OPENDATASOFT_API_URL,
