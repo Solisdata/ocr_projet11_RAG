@@ -1,80 +1,80 @@
+"""Récupère les événements OpenAgenda publiés sur OpenDataSoft : python -m script.api_opendatasoft"""
 
-#lancer le script : python -m script.api_opendatasoft
-# je réécupère des événements culturels, les lieux, des dates, des descriptions.
+from datetime import datetime, timedelta, timezone
 
-import requests
 import pandas as pd
-from datetime import datetime, timedelta
-from config import DATA_PATH, GEO_CITY, HISTORY_DAYS, OPENDATASOFT_API_URL
+import requests
 
-
-#api_key = os.environ.get("API_KEY") -- API publique, pas besoin d'authentification pour accéder aux données publiques.
-# headers = {
-#     "Authorization": f"Apikey {api_key}",
-#     "Content-Type": "application/json"
-# 
-
-
-
-# 1.Définir la période : un an d'historique
-start_date_filter = (
-    datetime.now() - timedelta(days=HISTORY_DAYS)
-).strftime("%Y-%m-%d")
-
-# 2.Construire les filtres OpenDataSoft
-where_clause = (
-    f"location_city='{GEO_CITY}' AND "
-    f"lastdate_end >= '{start_date_filter}'"
+from config import (
+    API_MAX_RECORDS,
+    API_PAGE_SIZE,
+    API_TIMEOUT,
+    DATA_PATH,
+    GEO_CITY,
+    HISTORY_DAYS,
+    OPENDATASOFT_API_URL,
 )
 
- 
-# 3. Interroger l'API : ne permet que de récupérer 100 événements par requête, donc il faud donc faire une boucle. Récupérer toutes les pages
-all_events = []
-offset = 0
-limit = 100
 
-while offset < 10000:
-    params = {
-        "lang": "fr",
-        "limit": limit,
-        "offset": offset,
-        "where": where_clause,
-        "order_by": "lastdate_end ASC",
-        "select": "title_fr,description_fr,conditions_fr,location_name,location_address,location_city,firstdate_begin,lastdate_end,canonicalurl,uid"
-    }
-    #j'ai selectionner les chamts qui m'intéressent avec la where clause
 
-    response = requests.get(
-        OPENDATASOFT_API_URL,
-        params=params,
-        timeout=15,
-    )
+EVENT_FIELDS = (
+    "title_fr,description_fr,conditions_fr,location_name,location_address,"
+    "location_city,firstdate_begin,lastdate_end,age_min,age_max,canonicalurl,uid"
+)
 
-    response.raise_for_status()
 
-    results = response.json().get("results", [])
+def fetch_events(city=GEO_CITY, history_days=HISTORY_DAYS):
+    """Télécharge toutes les pages correspondant à la ville et à la période."""
+    # La borne porte sur la date de fin : événements à venir et événements
+    # terminés depuis moins d'un an sont ainsi inclus.
+    date_limit = (datetime.now(timezone.utc) - timedelta(days=history_days)).date()
+    filters = [
+        f"location_city='{city}'",
+        f"lastdate_end >= '{date_limit.isoformat()}'",
+    ]
 
-    if not results:
-        break
+    events = []
+    for offset in range(0, API_MAX_RECORDS, API_PAGE_SIZE):
+        params = {
+            "lang": "fr",
+            "limit": API_PAGE_SIZE,
+            "offset": offset,
+            "where": " AND ".join(filters),
+            "order_by": "lastdate_end ASC",
+            "select": EVENT_FIELDS,
+        }
+        # Chaque requête a un délai maximal pour éviter de bloquer indéfiniment.
+        response = requests.get(
+            OPENDATASOFT_API_URL, params=params, timeout=API_TIMEOUT
+        )
+        response.raise_for_status()
+        page = response.json().get("results", [])
+        if not page:
+            break
 
-    all_events.extend(results)
+        events.extend(page)
 
-    print(f"{len(all_events)} événements récupérés")
+        # Une page incomplète indique qu'il n'y a plus de résultats à lire.
+        if len(page) < API_PAGE_SIZE:
+            print(f"{len(events)} événements récupérés")
+            break
 
-    if len(results) < limit:
-        break
+    return pd.DataFrame(events)
 
-    offset += limit
 
-# 4. Transformer les résultats en DataFrame
-df = pd.DataFrame(all_events)
+def save_events(data, output_path=DATA_PATH):
+    """Enregistre les données brutes en CSV avec les accents préservés."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    data.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"{len(data)} événements enregistrés dans {output_path}")
 
-# 5. Afficher les résultats
-print(f"\nVille : {GEO_CITY}")
-print(f"Date de début de l'historique : {start_date_filter}")
-print(f"Total récupéré : {len(df)} événements")
-print(df.head())
 
-df.to_csv(DATA_PATH, index=False, encoding="utf-8-sig")
+def main():
+    """Lance le téléchargement puis l'enregistrement du CSV brut."""
+    events = fetch_events()
+    print(f"Ville : {GEO_CITY} | Total récupéré : {len(events)} événement(s)")
+    save_events(events)
 
-print("Fichier CSV sauvegardé !")
+
+if __name__ == "__main__":
+    main()

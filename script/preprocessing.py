@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from config import CLEANED_DATA_PATH, DATA_PATH
+from config import CLEANED_DATA_PATH, DATA_PATH, GEO_CITY, HISTORY_DAYS
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,11 @@ REQUIRED_COLUMNS = (
 )
 
 
-def preprocess_data(data: pd.DataFrame) -> pd.DataFrame:
+def preprocess_data(
+    data: pd.DataFrame,
+    city: str = GEO_CITY,
+    history_days: int = HISTORY_DAYS,
+) -> pd.DataFrame:
     """Nettoie les champs et écarte les événements incomplets ou invalides."""
     logger.info("Début du prétraitement : %s événements reçus.", len(data))
 
@@ -75,6 +79,23 @@ def preprocess_data(data: pd.DataFrame) -> pd.DataFrame:
         "%s pour date de fin antérieure au début.",
         invalid_date_count,
         reversed_date_count,
+    )
+
+    # Applique aussi les filtres ici, même si le CSV provient d'une autre source.
+    # La ville est comparée sans tenir compte des majuscules ni espaces en trop.
+    city_matches = (
+        cleaned["location_city"].astype("string").str.strip().str.casefold()
+        == city.strip().casefold()
+    )
+    cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=history_days)
+    end_dates = pd.to_datetime(cleaned["lastdate_end"], errors="coerce", utc=True)
+    in_period = end_dates >= cutoff
+    outside_filter_count = int((~(city_matches & in_period)).sum())
+    cleaned = cleaned.loc[city_matches & in_period].copy()
+    logger.info(
+        "%s événement(s) écarté(s) car hors de la ville '%s' ou trop ancien(s).",
+        outside_filter_count,
+        city,
     )
 
     duplicate_count = int(cleaned.duplicated(subset="uid").sum())
