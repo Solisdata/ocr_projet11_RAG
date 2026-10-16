@@ -1,0 +1,41 @@
+# Nom du workflow CI (Continuous Integration)
+name: CI
+
+# Déclencheurs : Le pipeline s'exécute automatiquement lors d'un push ou d'une pull request
+# sur les branches principales (main ou master).
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  # Job unique de construction et de test
+  build:
+    # "Où" s'exécutent les tests : Sur les serveurs distants de GitHub Actions (machines virtuelles Linux sous Ubuntu)
+    # C'est entièrement isolé de votre machine locale.
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Récupération du code source du dépôt (clone le projet sur le serveur GitHub)
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    # 2. Configuration de l'environnement Python 3.13 sur le serveur distant
+    - name: Set up Python 3.13
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+        cache: 'pip' # Met en cache les dépendances pip pour accélérer les futurs builds
+
+    # 3. Installation des dépendances du projet définies dans requirements.txt
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    # 4. Exécution de la suite de tests unitaires/intégration avec pytest
+    # Si un test échoue (exit code != 0), le workflow échoue et bloque le merge (si configuré en branch protection).
+    - name: Run tests with pytest
+      run: |
+        python -m pytest tests/ -v
