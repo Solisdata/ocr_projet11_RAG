@@ -26,7 +26,7 @@ def load_events(input_path=CLEANED_DATA_PATH):
 
 
 def create_event_documents(events):
-    """Transforme chaque ligne en texte à chercher et métadonnées associées."""
+    """Crée un document par ligne du CSV."""
     documents = []
     for _, event in events.iterrows():
         # On met les informations utiles dans le texte transmis au modèle.
