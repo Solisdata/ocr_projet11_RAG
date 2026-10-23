@@ -1,4 +1,5 @@
 """Prépare les événements comme documents et les indexe dans FAISS."""
+#Lancer le script : python -m script.embeddings
 
 import os
 
@@ -9,24 +10,11 @@ from langchain_mistralai import MistralAIEmbeddings
 
 from config import CLEANED_DATA_PATH, FAISS_INDEX_PATH
 
-#vectorisation 
-
-def format_age(value):
-    """Affiche un âge proprement et transforme les valeurs vides en chaîne vide."""
-    if pd.isna(value) or not str(value).strip():
-        return ""
-    # Les colonnes numériques peuvent être lues comme 8.0 quand certaines cases sont vides.
-    try:
-        numeric_age = float(value)
-        if numeric_age.is_integer():
-            return str(int(numeric_age))
-    except (TypeError, ValueError):
-        pass
-    return str(value).strip()
+#vectorisation
 
 
 def load_events(input_path=CLEANED_DATA_PATH):
-    """Charge le CSV propre qui a été créé par le prétraitement."""
+    """Charge le CSV cleané et le convertit en DataFrame Pandas."""
     if not input_path.exists():
         raise FileNotFoundError(
             f"Fichier absent : {input_path}. Lance d'abord le prétraitement."
@@ -42,16 +30,9 @@ def create_event_documents(events):
     documents = []
     for _, event in events.iterrows():
         # On met les informations utiles dans le texte transmis au modèle.
-        age_min = format_age(event.get("age_min", ""))
-        age_max = format_age(event.get("age_max", ""))
-        if age_min and age_max:
-            age_range = f"{age_min} à {age_max} ans"
-        elif age_min:
-            age_range = f"À partir de {age_min} ans"
-        elif age_max:
-            age_range = f"Jusqu'à {age_max} ans"
-        else:
-            age_range = ""
+        age_min = str(event.get("age_min", "")).strip()
+        age_max = str(event.get("age_max", "")).strip()
+        age_range = str(event.get("age_range", "")).strip()
 
         text_parts = [
             ("Événement", event.get("title_fr", "")),
@@ -72,7 +53,7 @@ def create_event_documents(events):
             if str(value).strip(" -")
         )
 
-        # Ces champs restent attachés au vecteur pour citer l'événement retrouvé.
+
         metadata = {
             "uid": str(event.get("uid", "")),
             "title": str(event.get("title_fr", "")),
@@ -108,7 +89,7 @@ def build_vector_store(documents, index_path=FAISS_INDEX_PATH):
 
 
 def main():
-    """Lit le CSV propre et construit l'index vectoriel complet."""
+    """Lit le CSV et construit l'index vectoriel complet."""
     events = load_events()
     documents = create_event_documents(events)
     build_vector_store(documents)

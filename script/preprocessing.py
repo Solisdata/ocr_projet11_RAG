@@ -1,4 +1,4 @@
-"""Nettoie le CSV brut des événements pour les étapes suivantes du RAG."""
+#Nettoie le CSV brut des événements pour les étapes suivantes du RAG
 # Lancer le script : python -m script.preprocessing
 
 import logging
@@ -18,6 +18,31 @@ REQUIRED_COLUMNS = (
     "location_city",
 )
 
+def format_age(value) -> str:
+    """Normalise une borne d'âge et convertit les valeurs absentes en chaîne vide."""
+    if pd.isna(value) or not str(value).strip():
+        return ""
+    try:
+        numeric_age = float(value)
+        if numeric_age.is_integer():
+            return str(int(numeric_age))
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def format_age_range(age_min, age_max) -> str:
+    """Construit le libellé d'âge conseillé à partir des bornes disponibles."""
+    age_min = format_age(age_min)
+    age_max = format_age(age_max)
+    if age_min and age_max:
+        return f"{age_min} à {age_max} ans"
+    if age_min:
+        return f"À partir de {age_min} ans"
+    if age_max:
+        return f"Jusqu'à {age_max} ans"
+    return ""
+
 
 def preprocess_data(
     data: pd.DataFrame,
@@ -34,6 +59,16 @@ def preprocess_data(
         )
 
     cleaned = data.copy()
+
+    # Normalise les âges ici pour que les CSV prétraités soient prêts à indexer.
+    for column in ("age_min", "age_max"):
+        if column not in cleaned:
+            cleaned[column] = ""
+        cleaned[column] = cleaned[column].map(format_age)
+    cleaned["age_range"] = [
+        format_age_range(age_min, age_max)
+        for age_min, age_max in zip(cleaned["age_min"], cleaned["age_max"])
+    ]
 
     for column in cleaned.columns:
         if pd.api.types.is_string_dtype(cleaned[column].dtype):
@@ -60,7 +95,7 @@ def preprocess_data(
     missing_required_count = int((~valid_rows).sum())
     cleaned = cleaned.loc[valid_rows].copy()
     logger.info(
-        "%s événement(s) écarté(s) pour identifiant, titre ou ville manquant(e).",
+        "%s événements écartés pour titre ou ville manquante.",
         missing_required_count,
     )
 
@@ -75,13 +110,11 @@ def preprocess_data(
     valid_dates = parsed_dates & ~reversed_dates
     cleaned = cleaned.loc[valid_dates].copy()
     logger.info(
-        "%s événement(s) écarté(s) pour date(s) invalide(s), "
-        "%s pour date de fin antérieure au début.",
+        "%s événements écartés pour dates invalides, %s dates inversées.",
         invalid_date_count,
         reversed_date_count,
     )
 
-    # Applique aussi les filtres ici, même si le CSV provient d'une autre source.
     # La ville est comparée sans tenir compte des majuscules ni espaces en trop.
     city_matches = (
         cleaned["location_city"].astype("string").str.strip().str.casefold()
@@ -93,7 +126,7 @@ def preprocess_data(
     outside_filter_count = int((~(city_matches & in_period)).sum())
     cleaned = cleaned.loc[city_matches & in_period].copy()
     logger.info(
-        "%s événement(s) écarté(s) car hors de la ville '%s' ou trop ancien(s).",
+        "%s événements écartés car hors de la ville '%s' ou trop anciens.",
         outside_filter_count,
         city,
     )

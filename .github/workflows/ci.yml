@@ -13,7 +13,7 @@ jobs:
   # Job unique de construction et de test
   build:
     # "Où" s'exécutent les tests : Sur les serveurs distants de GitHub Actions (machines virtuelles Linux sous Ubuntu)
-    # C'est entièrement isolé de votre machine locale.
+    # C'est entièrement isolé de une machine locale.
     runs-on: ubuntu-latest
 
     steps:
@@ -35,7 +35,7 @@ jobs:
         pip install -r requirements.txt
 
     # 4. Exécution de la suite de tests unitaires/intégration avec pytest
-    # Si un test échoue (exit code != 0), le workflow échoue et bloque le merge (si configuré en branch protection).
+    # Si un test échoue (exit code != 0), le workflow échoue et bloque le merge 
     - name: Run tests with pytest
       run: |
         python -m pytest tests/ -v
