@@ -1,10 +1,9 @@
 
 # lancer les tests : python -m pytest tests/test_data.py -v
 
-from datetime import datetime, timedelta
-
 import pandas as pd
 from config import DATA_PATH, GEO_CITY, HISTORY_DAYS
+from script.preprocessing import preprocess_data
 
 # Critères attendus
 
@@ -62,19 +61,17 @@ def test_dates_are_valid():
 
 
 def test_events_are_in_expected_period():
-    """Vérifie que les événements ne sont pas trop anciens."""
-    df = load_data()
+    """Verifie que le pretraitement ecarte les evenements trop anciens."""
+    # Le CSV du depot est un instantane et peut vieillir ; c'est le resultat
+    # du pretraitement qui doit respecter la periode courante.
+    source = load_data()
+    date_limit = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=HISTORY_DAYS)
+    df = preprocess_data(source)
+    end_dates = pd.to_datetime(df["lastdate_end"], errors="coerce", utc=True)
 
-    end_dates = pd.to_datetime(
-        df["lastdate_end"], errors="coerce", utc=True
+    assert (end_dates >= date_limit).all(), (
+        "Le pretraitement conserve un evenement trop ancien."
     )
-
-    date_limit = (datetime.now() - timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%d")
-
-    assert (end_dates.dt.strftime("%Y-%m-%d") >= date_limit).all(), (
-        "Certains événements sont terminés depuis plus d'un an."
-    )
-
 
 def test_events_are_in_expected_city():
     """Vérifie que tous les événements sont associés à la ville configurée."""
