@@ -42,6 +42,51 @@ python -m script.preprocessing
 python -m script.embeddings
 ```
 
+Pour inspecter l'index FAISS local (nombre de vecteurs, dimension, métadonnées et
+contenu de quelques documents), sans appeler l'API Mistral :
+
+```powershell
+python -m script.read_index
+python -m script.read_index --limit 10
+```
+
+Le script lit `data/faiss_index/` par défaut. `index.pkl` est chargé avec
+`pickle` par LangChain : n'inspecte que les index créés par ce projet ou dont
+la provenance est fiable.
+
+## Chatbot de recommandations
+
+Après avoir créé l'index et configuré `MISTRAL_API_KEY`, lancer le chatbot :
+
+```powershell
+python -m script.chatbot
+```
+
+Le chatbot récupère les cinq événements les plus proches dans FAISS, puis demande
+à Mistral de répondre à partir de leur contenu. Il affiche les événements consultés
+avec leurs liens disponibles. La conversation ne conserve pas d'historique. Pour
+changer le nombre de résultats, utiliser `--k 8`. Le modèle peut être choisi avec
+`--model nom-du-modele` ou la variable `MISTRAL_CHAT_MODEL` (défaut :
+`mistral-small-latest`). Chaque question déclenche des appels Mistral pour la
+recherche vectorielle et la génération de la réponse.
+
+### Interface web Streamlit
+
+Lancer l'interface depuis la racine du projet :
+
+```powershell
+python -m streamlit run app.py
+```
+
+L'interface affiche les réponses avec les liens des événements consultés. Elle
+garde les échanges uniquement pendant la session Streamlit en cours. Le nombre
+d'événements utilisés pour la recherche se règle dans la barre latérale. Après
+l'ajout de Streamlit dans `requirements.txt`, installer la dépendance avec :
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
 La création de l’index appelle l’API Mistral. Relancer cette étape recrée l’index et consomme des appels d’API.
 
 ## Tests
