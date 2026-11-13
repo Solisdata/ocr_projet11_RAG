@@ -84,33 +84,7 @@ L'enchaînement des étapes, du script de collecte jusqu'à l'interface, avec le
 
 ![Logigramme du RAG](docs/logigramme_RAG.png)
 
-### Détail des deux phases
 
-```mermaid
-flowchart LR
-  subgraph idx["Indexation — hors ligne (python -m script.run_pipeline)"]
-    a1["Collecte<br/>API OpenDataSoft / OpenAgenda"] --> a2["CSV brut<br/>evenements_nantes.csv"]
-    a2 --> a3["Prétraitement Pandas<br/>nettoyage, filtres, dédoublonnage"]
-    a3 --> a4["CSV nettoyé<br/>evenements_nantes_clean.csv"]
-    a4 --> a5["1 événement = 1 document<br/>texte + métadonnées"]
-    a5 --> a6["Embeddings Ollama<br/>embeddinggemma, lots de 32"]
-    a6 --> a7[("Index FAISS<br/>data/faiss_index/")]
-  end
-  subgraph req["Requête — en ligne (chatbot / Streamlit)"]
-    b1["Question de l'utilisateur"] --> b2["Vectorisation<br/>même modèle d'embedding"]
-    b2 --> b3["Recherche FAISS<br/>top-k événements proches"]
-    b3 --> b4["Prompt<br/>instructions + date du jour + contexte"]
-    b4 --> b5["LLM Ollama<br/>qwen3"]
-    b5 --> b6["Réponse en français<br/>+ sources (titre, URL)"]
-  end
-  a7 -.-> b3
-```
-
-**Lecture du schéma**
-
-- **Indexation (hors ligne)** : les événements sont collectés, nettoyés puis transformés en vecteurs. Chaque événement forme un seul document (titre, description, conditions, lieu, adresse, ville, âge conseillé, dates). Les documents ne sont pas découpés en morceaux.
-- **Requête (en ligne)** : la question est vectorisée avec le même modèle que les documents, ce qui rend leurs vecteurs comparables. FAISS renvoie les *k* événements les plus proches. Le LLM rédige la réponse à partir de ce contexte uniquement.
-- **L'index ne rédige rien** : il retrouve les documents. C'est le LLM qui écrit la réponse.
 
 ## Choix technologiques
 
@@ -128,14 +102,6 @@ flowchart LR
 | Qualité | **pytest** + **GitHub Actions** | Tests à chaque push et pull request sur `main`. |
 
 ### Embeddings : local ou Cloud ?
-
-| Type de solution | Exemples | Sécurité des données | Coût (10 000 documents) |
-| --- | --- | --- | --- |
-| Local / CPU | Sentence Transformers | Maximale (100 % local) | 0 € / token |
-| **Moteur local (retenu)** | **Ollama** | **Maximale (100 % local)** | **0 € / token** (matériel à prévoir) |
-| API Cloud SaaS | Mistral, GPT-4o, Gemini | Moyenne à forte (RGPD UE / Cloud Act US) | 100 à 400 € / mois |
-| Auto-hébergement Cloud | LLaMA 70B, Mixtral 8x22B via vLLM | Excellente (infrastructure maîtrisée) | 2 000 à 5 000 € / mois |
-
 Le POC a d'abord été écrit avec l'API Mistral, puis basculé sur Ollama. Un index créé avec un modèle d'embedding ne fonctionne pas avec un autre : il faut le reconstruire.
 
 ### Base vectorielle
