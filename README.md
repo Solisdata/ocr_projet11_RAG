@@ -101,28 +101,6 @@ L'enchaînement des étapes, du script de collecte jusqu'à l'interface, avec le
 | Interface | **Streamlit** | Chat web en quelques lignes, avec réglage du modèle et affichage des temps de réponse. |
 | Qualité | **pytest** + **GitHub Actions** | Tests à chaque push et pull request sur `main`. |
 
-### Embeddings : local ou Cloud ?
-Le POC a d'abord été écrit avec l'API Mistral, puis basculé sur Ollama. Un index créé avec un modèle d'embedding ne fonctionne pas avec un autre : il faut le reconstruire.
-
-### Base vectorielle
-
-| Solution | Hébergement | Passage à l'échelle | Données locales |
-| --- | --- | --- | --- |
-| **FAISS (retenu)** | Local, dans l'application Python | Limité par la machine | Oui |
-| Weaviate | Local ou Cloud | Adapté à la montée en charge, filtres | Oui si auto-hébergé |
-| Milvus | Local ou Cloud, distribué | Très grands volumes | Oui si auto-hébergé |
-| Pinecone | Cloud managé | Adapté à la montée en charge | Non |
-
-### Algorithme d'indexation FAISS
-
-| Algorithme | Principe | Compromis |
-| --- | --- | --- |
-| **IndexFlat (retenu)** | Compare la question à tous les vecteurs. | Résultat exact. Plus lent quand le volume augmente. |
-| IndexIVFFlat | Répartit les vecteurs en groupes et n'explore que les plus proches. | Plus rapide, mais peut manquer le meilleur résultat. |
-| IndexHNSW | Parcourt un graphe de voisins proches. | Très rapide, mais plus gourmand en mémoire. |
-
-Pour environ 10 000 événements, la recherche exhaustive reste rapide. Elle ne manque jamais le résultat le plus proche.
-
 ### Prompt du chatbot
 
 Le prompt système impose au modèle de :
@@ -147,7 +125,7 @@ python -m pytest tests/ -v
 | `tests/test_embeddings.py` | Un document est créé par ligne du CSV. L'index FAISS est créé avec un faux modèle d'embedding, donc sans Ollama. |
 | `tests/test_embeddings.py` (intégration) | Ollama renvoie des vecteurs de dimension constante. Ces tests sont ignorés par défaut. |
 | `tests/test_periode.py` | Les expressions « ce week-end », « demain », « week-end prochain » donnent les bons intervalles. Un événement n'est gardé que s'il a une séance dans la période. |
-| `tests/test_evaluation.py` | Le jeu de test d'évaluation est complet et cohérent avec les données : chaque `uid` attendu existe dans le CSV et a une séance dans la période de la question, la période détectée correspond à l'annotation. Les notes (Recall, MRR, couverture, similarité, refus) sont vérifiées sur de petits exemples calculés à la main. |
+| `tests/test_evaluation.py` | Le jeu de test d'évaluation est complet et cohérent avec les données : chaque `uid` attendu existe dans le CSV et a une séance dans la période de la question, la période détectée correspond à l'annotation. Les notes (Recall, MRR, couverture, similarité, refus) sont vérifiées. |
 
 Pour lancer les tests d'intégration avec Ollama démarré et `embeddinggemma` téléchargé :
 
@@ -176,51 +154,7 @@ Pour vérifier ces valeurs sur votre index :
 python -m script.read_index
 ```
 
-### Temps de réponse
-
-L'interface Streamlit affiche sous chaque réponse :
-
-- **Recherche** : vectorisation de la question et recherche FAISS ;
-- **Réponse Ollama** : temps de génération du LLM ;
-- **Total**.
-
-Exemple mesuré sur la machine de développement, avec `qwen3:1.7b`, pour la question « Un concert ce week-end ? » :
-
-| Étape | Temps |
-| --- | --- |
-| Recherche (embedding + FAISS) | 3,8 s |
-| Génération Ollama | 72,3 s |
-| Total | 76,1 s |
-
-La génération représente l'essentiel du temps. Elle dépend du modèle choisi et de la machine (CPU ou GPU). Un modèle plus petit (`qwen3:1.7b`) répond plus vite qu'un modèle plus grand (`qwen3:8b`), mais avec des réponses moins riches.
-
 ### Qualité des réponses : évaluation sur un jeu de test annoté
-
-#### Le jeu de test
-
-[`evaluation/jeu_test.json`](evaluation/jeu_test.json) contient **5 questions annotées à la main** à partir du CSV nettoyé. Pour chaque question, on a noté :
-
-| Champ | Rôle |
-| --- | --- |
-| `question` | La question, écrite comme un utilisateur la poserait. |
-| `date_reference` | Le « maintenant » simulé (vendredi 13/11/2026, 10h00). Les réponses dépendent du jour, il faut donc le figer pour que l'évaluation soit reproductible. |
-| `periode_attendue` | La période que doit détecter `script/periode.py` (« ce week-end », « demain »... ou aucune). |
-| `uids_attendus` | Les événements pertinents (vérité terrain de la recherche). |
-| `reponse_attendue` | La réponse de référence, dans le format demandé au LLM. |
-| `elements_cles` | Les informations qui doivent figurer dans la réponse : titre, jour, horaire, lieu, prix. |
-| `doit_refuser` | `true` si la bonne réponse est « aucun événement ne correspond ». |
-
-Les 5 questions couvrent chacune un cas différent, y compris des cas difficiles :
-
-| Id | Catégorie | Question | Ce qu'elle teste |
-| --- | --- | --- | --- |
-| q01 | `public` | « Que faire ce week-end avec un enfant de 4 ans ? » | Période + âge du public, 3 événements attendus. |
-| q02 | `evenement_precis` | « Comment participer à la Nuit sans fin consacrée à Steve Reich au Conservatoire ? » | Détails pratiques d'un événement (créneaux, réservation, prix). |
-| q03 | `periode_et_theme` | « Un spectacle d'improvisation ce soir ? » | Période courte + thème précis, 4 événements attendus. |
-| q04 | `periode_et_theme` | « Y a-t-il un concert de Noël le week-end prochain ? » | Période future, un seul bon événement parmi d'autres concerts. |
-| q05 | `hors_corpus` | « Quels événements sont prévus à Lyon ce week-end ? » | Le chatbot doit dire qu'il ne couvre que Nantes. |
-
-`tests/test_evaluation.py` vérifie que les annotations restent justes : chaque `uid` attendu existe et a bien une séance dans la période de la question. Si les données sont rechargées depuis l'API, ce test signale les questions à ré-annoter.
 
 #### Les indicateurs
 
@@ -261,21 +195,13 @@ Temps moyens : 2,2 s pour la recherche, 14,1 s pour la génération.
 - **Le chatbot ne sait pas dire « je n'ai rien »** (q05) : il reçoit toujours 5 événements et propose des événements nantais pour une question sur Lyon.
 - **Limite de la mesure** : 5 questions donnent une première tendance, pas une mesure stable. La couverture est une mesure lexicale : elle ne détecte pas toutes les hallucinations, d'où l'intérêt d'un LLM juge (voir les limites).
 
-## Limites du projet
+## Piste d'amélioration
+Récupérer les données supplémentaires sans avoir à relancer le modèle d’embedding pour l’ensemble des données
+Rendre le POC scalable en adaptant les outils utilisés
+Ajuster le modèle pour maximisés la qualité des réponses
+Évaluer les réponses avec RAGAS sur des questions de reference
 
-| Limite | Piste d'amélioration |
-| --- | --- |
-| **Évaluation encore partielle** : 5 questions annotées, une mesure de réponse lexicale (couverture) et une similarité d'embeddings. La fidélité aux sources n'est pas notée directement. | Ajouter un LLM « juge » (RAGAS : *faithfulness*, *answer relevancy*). Enrichir le jeu de test (questions de suivi, fautes de frappe, autres villes). Lancer `--sans-generation` dans la CI pour suivre le Recall@k à chaque modification. |
-| **Pas de refus quand rien ne correspond** : le chatbot reçoit toujours *k* événements et en propose même s'ils sont hors sujet (ex. « événements à Lyon »). | Ne pas envoyer au LLM les événements dont le score de similarité est sous un seuil, réglé sur le jeu de test. Ajouter au prompt : « si aucun événement ne correspond, ou si la ville n'est pas Nantes, dis-le ». |
-| **Mélange d'événements par le LLM** : `qwen3:1.7b` peut accoler le titre d'un événement au lieu ou au prix d'un autre. | Vérifier après génération que chaque titre cité existe dans le contexte. Tester `qwen3:4b`. |
-| **Recherche purement sémantique** : les mots exacts (« impro », sigle « ONPL ») pèsent peu dans l'embedding. | Recherche hybride BM25 + FAISS (`EnsembleRetriever`), ou récupérer 20 candidats et les reclasser avec un cross-encoder. |
-| **Dates mal comprises par la recherche** : FAISS cherche par sens, pas par date. Une question comme « ce week-end » peut faire remonter des événements à d'autres dates. | Extraire la période de la question (« ce week-end » → samedi-dimanche), puis filtrer sur les métadonnées `start_date` / `end_date` avant ou après la recherche FAISS. |
-| **Couverture limitée** : une seule ville (Nantes) et un plafond de 10 000 événements. | Rendre la ville paramétrable dans l'interface, ajouter `location_city` en filtre de métadonnées et augmenter `API_MAX_RECORDS`. Au-delà de 100 000 événements, passer à un index `IndexHNSW` ou à une base comme Weaviate ou Milvus. |
-| **Données figées** : l'index n'est pas mis à jour automatiquement. Le reconstruire oblige à recalculer tous les embeddings. | Planifier la collecte chaque nuit (cron, GitHub Actions). Ne vectoriser que les nouveaux événements et les ajouter avec `add_documents`. Supprimer les événements passés grâce à leur `uid`. |
-| **Dépendance au matériel** : les temps de réponse dépendent de la machine. Sans GPU, la génération reste lente (environ 70 s). | Afficher la réponse au fur et à mesure (streaming), réduire `k`, utiliser un GPU ou un serveur dédié, ou une API Cloud européenne (Mistral) pour la production. |
-| **Petit modèle de génération** : `qwen3:1.7b` peut mal suivre les consignes ou se tromper sur les dates (ex. un vendredi annoncé comme « mardi »). | Tester `qwen3:4b` / `qwen3:8b`. Donner le jour de la semaine dans le prompt (« jeudi 12/11/2026 ») et dans le texte des événements. |
-| **Pas d'historique de conversation** : chaque question est traitée indépendamment des précédentes. | Transmettre les derniers échanges au prompt (`MessagesPlaceholder` de LangChain) et reformuler la question de suivi avant la recherche. |
-| **Maintenance** : `langchain-community` est en cours d'abandon (avertissements de dépréciation). `index.pkl` est chargé avec `pickle`. | Migrer vers les paquets dédiés (`langchain-ollama`, intégration FAISS autonome). Ne charger que des index créés par le projet, et enregistrer dans l'index le modèle d'embedding et la date de création. |
+
 
 ## Configuration de l'environnement
 
