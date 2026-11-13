@@ -1,0 +1,84 @@
+﻿id,categorie,question,uids_attendus,uids_trouves,recall_at_k,precision_at_k,mrr,temps_recherche_s,temps_generation_s,couverture_elements,f1_lexical,similarite_semantique,refus_detecte,refus_correct,reponse,reponse_attendue
+q01,public,Que faire ce week-end avec un enfant de 4 ans ?,67479279 8623780 41506315,67479279 33221649 8623780 76726638 41506315,1.0,0.6,1.0,2.278,13.671,0.8,0.5555555555555556,0.8568852691540951,False,True,"**Animation enfants – Château des ducs de Bretagne**  
+Samedi 14/11/2026 de 10h45 à 12h15  
+Château des ducs de Bretagne - musée d'histoire de Nantes  
+Tarif : Gratuit  
+
+**À la recherche des arcs-en-ciel**  
+Dimanche 15/11/2026 de 11h15 à 12h00  
+Musée d'arts de Nantes  
+Tarif : 2,5€/4€/6€  
+
+**Enfantines**  
+Samedi 14/11/2026 de 11h00 à 12h00  
+Bibliothèque de la Manufacture  
+Tarif : Gratuit","- Animation enfants au Château des ducs de Bretagne (4 à 6 ans) : chasse aux œufs de dragons dans le musée, samedi 14/11/2026 de 10h45 à 12h15.
+- À la recherche des arcs-en-ciel (2/4 ans) : visite guidée en famille au Musée d'arts de Nantes, dimanche 15/11/2026 de 11h15 à 12h00, sur réservation (6 € / 4 € / 2,5 €).
+- Gabilolo et la hotte du Père Noël (2 à 8 ans) : spectacle jeune public au Théâtre de Jeanne, dimanche 15/11/2026 de 15h00 à 15h50, de 10 à 12 €."
+q02,evenement_precis,Comment participer à la Nuit sans fin consacrée à Steve Reich au Conservatoire ?,1292902 76485148 22530552 98236500,1292902 22530552 76485148 98236500 17721733,1.0,0.8,1.0,2.218,15.067,1.0,0.4957264957264957,0.847948610771895,False,True,"1. **La nuit sans fin - Créneau A**  
+   - Jour : Samedi 14/11/2026  
+   - Horaire : 17h00 - 20h00  
+   - Lieu : Conservatoire de Nantes  
+   - Prix : Gratuit sur réservation en ligne  
+
+2. **La nuit sans fin - Music for 18 musicians**  
+   - Jour : Samedi 14/11/2026  
+   - Horaire : 19h00 - 20h00  
+   - Lieu : Conservatoire de Nantes  
+   - Prix : 9€ / 3€ / Gratuité selon conditions  
+
+3. **La nuit sans fin - Créneau B**  
+   - Jour : Samedi 14/11/2026  
+   - Horaire : 20h00 - 23h59  
+   - Lieu : Conservatoire de Nantes  
+   - Prix : Gratuit sur réservation en ligne","La Nuit sans fin a lieu samedi 14/11/2026 au Conservatoire de Nantes (4 rue Gaëtan Rondeau) :
+- Créneau A de 17h00 à 20h00 ou créneau B de 20h00 à minuit : gratuits, sur réservation en ligne.
+- Concert « Music for 18 musicians » de Steve Reich à 19h00 et à 21h00 : billetterie en ligne et au guichet (9 € / 3 € / gratuité selon conditions).
+L'exposition « Steve Reich, le minimalisme et son héritage » (gratuite) permet de s'y préparer."
+q03,periode_et_theme,Un spectacle d'improvisation ce soir ?,50315769 64486904 14955474 84244488,82223690 39856511 94159140 64486904 12342032,0.25,0.2,0.25,2.244,13.518,0.6666666666666666,0.48214285714285715,0.7744128952144089,False,True,"Événement : Le Tapissage | Les Complices Impro  
+Jour : vendredi 13/11/2026  
+Horaire : 19h00 à 20h30  
+Lieu : Mystère Impro Club  
+Prix : 5€ à l’entrée + prix libre à la sortie  
+
+Événement : Le Premier Artifice  
+Jour : vendredi 13/11/2026  
+Horaire : 20h30 à 22h10  
+Lieu : Parc des Chantiers  
+Prix : De 9 € à 28 €  
+
+Événement : Vivre tout simplement  
+Jour : vendredi 13/11/2026  
+Horaire : 20h30 à 21h30  
+Lieu : Théâtre du Cyclope  
+Prix : De 10,50 € à 15 €","- Le Tapissage (Les Complices Impro) : Mystère Impro Club (9 rue Paré), vendredi 13/11/2026 de 19h00 à 20h30, 5 € + prix libre à la sortie.
+- Match d'impro professionnel LINA x LNI (Québec) : Maison de Quartier de Doulon, vendredi 13/11/2026 de 20h30 à 23h30, de 19 à 25 €.
+- Rien que pour vous (Alexis & Trem) : Mystère Comedy Club, vendredi 13/11/2026 de 21h00 à 22h15, sur réservation + prix libre."
+q04,periode_et_theme,Y a-t-il un concert de Noël le week-end prochain ?,34650300,34650300 73471868 2032137 67832159 29364765,1.0,0.2,1.0,2.25,12.728,0.25,0.22535211267605634,0.6803369816859967,False,True,"Concert de Noël : Samedi 20/11/2026 à 23h59 - Warehouse Nantes  
+Prix : 30.21 € à 34.52 €  
+Lieu : Warehouse Nantes  
+
+Concert de Choro : Dimanche 22/11/2026 à 18h30 - Auberge les Bains douches  
+Prix : 10 €  
+Lieu : Auberge les Bains douches  
+
+Concert symphonique : Samedi 21/11/2026 à 18h00 - Conservatoire de Nantes  
+Prix : 10 € à 48 €  
+Lieu : Conservatoire de Nantes","Concert de Noël de l'Ensemble vocal de Nantes (chants de Noël, Bach, Haendel...) à l'église Notre-Dame de Bon Port (2 rue Damrémont), dimanche 22/11/2026 de 17h00 à 18h30."
+q05,hors_corpus,Quels événements sont prévus à Lyon ce week-end ?,,40587068 75799130 71515580 10269529 44045226,,,,2.211,15.637,,0.0606060606060606,0.5328450536158266,False,False,"Événement : Vide-Dressing Automne/Hiver - Vêtements + Jouets  
+Jour : samedi 14/11/2026  
+Horaire : 10h00 à 13h00  
+Lieu : Le Ripaillon  
+Prix : Gratuit - Participation libre  
+
+Événement : Nos lendemains  
+Jour : samedi 14/11/2026  
+Horaire : 19h00 à 20h30  
+Lieu : Théâtre de Poche Graslin  
+Prix : 11 à 22€  
+
+Événement : Festival des Solidarités 2026  
+Jour : samedi 14/11/2026  
+Horaire : 17h00 à 21h30  
+Lieu : Nantes  
+Prix : Gratuit",Je n'ai aucun événement à Lyon : les événements disponibles concernent uniquement Nantes.

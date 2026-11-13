@@ -19,6 +19,7 @@ from script.periode import FUSEAU, chevauche, detecter_periode, formater_jour, f
 
 NOMBRE_EVENEMENTS = 5  # nombre d'événements transmis au LLM (le "k" du top-k)
 TEMPERATURE = 0.2  # faible = réponses plus factuelles
+MAX_TOKENS_REPONSE = 500  # garde-fou : le temps de réponse est proportionnel au nombre de mots générés
 
 INSTRUCTIONS = """
 Tu es un assistant qui recommande des événements.
@@ -30,6 +31,8 @@ Pour chaque suggestion, donne le jour et l'horaire indiqués dans "Séances".
 Réponds en français et choisis les événements qui correspondent le mieux au reste
 de la demande (lieu, public, type de sortie...).
 Utilise uniquement les informations des événements fournis. N'invente pas de détails.
+Sois concis : 3 suggestions au maximum, 2 ou 3 lignes chacune (nom, jour et horaire,
+lieu, prix si connu), sans longue introduction ni conclusion.
 """.strip()
 
 PROMPT = ChatPromptTemplate.from_messages(
@@ -90,20 +93,55 @@ class EventChatbot:
         self.k = k
 
         # 3. Le LLM local qui rédige la réponse.
-        llm = ChatOllama(model=model_name, base_url=OLLAMA_BASE_URL, temperature=TEMPERATURE)
+        #    reasoning=False coupe le mode "thinking" de qwen3 : sinon le modèle rédige
+        #    d'abord un long raisonnement caché (x4 à x5 sur le temps de réponse).
+        llm = ChatOllama(
+            model=model_name,
+            base_url=OLLAMA_BASE_URL,
+            temperature=TEMPERATURE,
+            reasoning=False,
+            num_predict=MAX_TOKENS_REPONSE,
+        )
 
         # 4. La chaîne : prompt rempli -> LLM -> texte.
         self.chain = PROMPT | llm | StrOutputParser()
 
-    def ask(self, question):
-        """Renvoie la réponse, les événements utilisés et le temps de chaque étape."""
+    def ask(self, question, maintenant=None):
+        """Renvoie la réponse, les événements utilisés et le temps de chaque étape.
+
+        maintenant : date simulée de la question (utile pour l'évaluation) ; par défaut, l'heure actuelle.
+        """
+        entrees, documents, temps_recherche = self.retrieve(question, maintenant)
+
+        # Generation : le LLM répond à partir des événements trouvés.
+        debut = time.perf_counter()
+        answer = self.chain.invoke(entrees)
+        temps_generation = time.perf_counter() - debut
+
+        timings = {
+            "search": temps_recherche,
+            "generation": temps_generation,
+            "total": temps_recherche + temps_generation,
+        }
+        return answer, documents, timings
+
+    def ask_stream(self, question):
+        """Comme ask, mais la réponse arrive morceau par morceau (affichage au fil de l'eau).
+
+        Renvoie (flux de texte, événements utilisés, temps de recherche).
+        """
+        entrees, documents, temps_recherche = self.retrieve(question)
+        return self.chain.stream(entrees), documents, temps_recherche
+
+    def retrieve(self, question, maintenant=None):
+        """Recherche les événements et prépare les entrées du prompt."""
         question = question.strip()
         if not question:
             raise ValueError("Écris une question avant de l'envoyer.")
 
         # Filtre par date : l'embedding ne comprend pas "ce week-end", on filtre donc
         # sur les dates des métadonnées. Sans période citée, on écarte les événements passés.
-        maintenant = datetime.now(FUSEAU)
+        maintenant = maintenant or datetime.now(FUSEAU)
         periode = detecter_periode(question, maintenant)
         if periode:
             nom, debut_periode, fin_periode, expression = periode
@@ -135,26 +173,15 @@ class EventChatbot:
         ]
         temps_recherche = time.perf_counter() - debut
 
-        # Generation : le LLM répond à partir des événements trouvés.
-        debut = time.perf_counter()
-        answer = self.chain.invoke(
-            {
-                "question": question,
-                "context": "\n\n---\n\n".join(
-                    contexte_evenement(doc, debut_periode, fin_periode, bool(periode)) for doc in documents
-                ),
-                "current_date": formater_jour(maintenant),
-                "period": consigne_periode,
-            }
-        )
-        temps_generation = time.perf_counter() - debut
-
-        timings = {
-            "search": temps_recherche,
-            "generation": temps_generation,
-            "total": temps_recherche + temps_generation,
+        entrees = {
+            "question": question,
+            "context": "\n\n---\n\n".join(
+                contexte_evenement(doc, debut_periode, fin_periode, bool(periode)) for doc in documents
+            ),
+            "current_date": formater_jour(maintenant),
+            "period": consigne_periode,
         }
-        return answer, documents, timings
+        return entrees, documents, temps_recherche
 
 
 def main():

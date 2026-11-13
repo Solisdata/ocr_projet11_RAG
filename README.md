@@ -41,17 +41,29 @@ projet_11/
 │   └── faiss_index/                # Index vectoriel utilisé par le chatbot
 │       ├── index.faiss             #   vecteurs
 │       └── index.pkl               #   textes et métadonnées des documents
+├── docs/
+│   ├── architecture_RAG.png        # Schéma d'architecture : briques et outils du RAG
+│   ├── logigramme_RAG.png          # Logigramme : enchaînement des étapes et des scripts
+│   ├── ocr_projet11_RAG_v6.pptx    # Présentation du POC
+│   └── Rapport_technique_du_POC_RAG_MLS.pdf  # Rapport technique du POC
 ├── script/
 │   ├── api_opendatasoft.py         # 1. Collecte paginée des événements
 │   ├── preprocessing.py            # 2. Nettoyage, normalisation, filtrage, dédoublonnage
 │   ├── embeddings.py               # 3. Création des documents, vectorisation, index FAISS
 │   ├── run_pipeline.py             # Enchaîne les étapes 1 → 2 → 3
 │   ├── chatbot.py                  # Chaîne RAG : recherche FAISS + génération Ollama (terminal)
+│   ├── periode.py                  # Détection de la période (« ce week-end »...) et filtre par date
+│   ├── evaluation.py               # Évaluation du RAG sur le jeu de test annoté
 │   └── read_index.py               # Inspection de l'index (nombre de vecteurs, dimension, exemples)
+├── evaluation/
+│   ├── jeu_test.json               # Jeu de test annoté : questions, événements et réponses attendus
+│   └── resultats/                  # Résultats de chaque évaluation (un CSV par lancement)
 ├── tests/
 │   ├── test_data.py                # Qualité du CSV nettoyé
 │   ├── test_preprocessing.py       # Règles de prétraitement
-│   └── test_embeddings.py          # Création des documents et de l'index FAISS
+│   ├── test_embeddings.py          # Création des documents et de l'index FAISS
+│   ├── test_periode.py             # Détection des périodes et filtre par date
+│   └── test_evaluation.py          # Cohérence du jeu de test et calcul des métriques
 ├── app.py                          # Interface Streamlit du chatbot
 ├── config.py                       # Chemins, ville, période, paramètres API et modèles
 ├── check_env.py                    # Vérifie que les dépendances s'importent correctement
@@ -60,7 +72,19 @@ projet_11/
 └── README.md
 ```
 
+## Architecture du RAG
+
+Les briques du système et l'outil qui porte chacune : Streamlit pour l'interface, LangChain pour la chaîne, Ollama pour les embeddings et le LLM, FAISS pour l'index vectoriel.
+
+![Architecture du RAG](docs/architecture_RAG.png)
+
 ## Logigramme
+
+L'enchaînement des étapes, du script de collecte jusqu'à l'interface, avec les tests associés à chaque étape.
+
+![Logigramme du RAG](docs/logigramme_RAG.png)
+
+### Détail des deux phases
 
 ```mermaid
 flowchart LR
@@ -156,6 +180,8 @@ python -m pytest tests/ -v
 | `tests/test_preprocessing.py` | Le nettoyage du texte, la journalisation des événements écartés et le rejet d'un fichier sans les colonnes requises. |
 | `tests/test_embeddings.py` | Un document est créé par ligne du CSV. L'index FAISS est créé avec un faux modèle d'embedding, donc sans Ollama. |
 | `tests/test_embeddings.py` (intégration) | Ollama renvoie des vecteurs de dimension constante. Ces tests sont ignorés par défaut. |
+| `tests/test_periode.py` | Les expressions « ce week-end », « demain », « week-end prochain » donnent les bons intervalles. Un événement n'est gardé que s'il a une séance dans la période. |
+| `tests/test_evaluation.py` | Le jeu de test d'évaluation est complet et cohérent avec les données : chaque `uid` attendu existe dans le CSV et a une séance dans la période de la question, la période détectée correspond à l'annotation. Les notes (Recall, MRR, couverture, similarité, refus) sont vérifiées sur de petits exemples calculés à la main. |
 
 Pour lancer les tests d'intégration avec Ollama démarré et `embeddinggemma` téléchargé :
 
@@ -202,22 +228,81 @@ Exemple mesuré sur la machine de développement, avec `qwen3:1.7b`, pour la que
 
 La génération représente l'essentiel du temps. Elle dépend du modèle choisi et de la machine (CPU ou GPU). Un modèle plus petit (`qwen3:1.7b`) répond plus vite qu'un modèle plus grand (`qwen3:8b`), mais avec des réponses moins riches.
 
-### Qualité des réponses (à mesurer)
+### Qualité des réponses : évaluation sur un jeu de test annoté
 
-| Indicateur | Ce qu'il mesure |
+#### Le jeu de test
+
+[`evaluation/jeu_test.json`](evaluation/jeu_test.json) contient **5 questions annotées à la main** à partir du CSV nettoyé. Pour chaque question, on a noté :
+
+| Champ | Rôle |
 | --- | --- |
-| Recall@k | Part des événements pertinents retrouvés parmi les *k* premiers résultats. |
-| Precision@k | Part des *k* résultats qui sont réellement pertinents. |
-| Fidélité | La réponse ne contient que des informations présentes dans les événements fournis. |
-| Respect des dates | Aucun événement passé ou hors période n'est recommandé. |
+| `question` | La question, écrite comme un utilisateur la poserait. |
+| `date_reference` | Le « maintenant » simulé (vendredi 13/11/2026, 10h00). Les réponses dépendent du jour, il faut donc le figer pour que l'évaluation soit reproductible. |
+| `periode_attendue` | La période que doit détecter `script/periode.py` (« ce week-end », « demain »... ou aucune). |
+| `uids_attendus` | Les événements pertinents (vérité terrain de la recherche). |
+| `reponse_attendue` | La réponse de référence, dans le format demandé au LLM. |
+| `elements_cles` | Les informations qui doivent figurer dans la réponse : titre, jour, horaire, lieu, prix. |
+| `doit_refuser` | `true` si la bonne réponse est « aucun événement ne correspond ». |
 
-Ces indicateurs nécessitent un jeu de questions types annoté. Il n'existe pas encore dans le POC.
+Les 5 questions couvrent chacune un cas différent, y compris des cas difficiles :
+
+| Id | Catégorie | Question | Ce qu'elle teste |
+| --- | --- | --- | --- |
+| q01 | `public` | « Que faire ce week-end avec un enfant de 4 ans ? » | Période + âge du public, 3 événements attendus. |
+| q02 | `evenement_precis` | « Comment participer à la Nuit sans fin consacrée à Steve Reich au Conservatoire ? » | Détails pratiques d'un événement (créneaux, réservation, prix). |
+| q03 | `periode_et_theme` | « Un spectacle d'improvisation ce soir ? » | Période courte + thème précis, 4 événements attendus. |
+| q04 | `periode_et_theme` | « Y a-t-il un concert de Noël le week-end prochain ? » | Période future, un seul bon événement parmi d'autres concerts. |
+| q05 | `hors_corpus` | « Quels événements sont prévus à Lyon ce week-end ? » | Le chatbot doit dire qu'il ne couvre que Nantes. |
+
+`tests/test_evaluation.py` vérifie que les annotations restent justes : chaque `uid` attendu existe et a bien une séance dans la période de la question. Si les données sont rechargées depuis l'API, ce test signale les questions à ré-annoter.
+
+#### Les indicateurs
+
+| Étape | Indicateur | Ce qu'il mesure |
+| --- | --- | --- |
+| Recherche | **Recall@k** | Part des événements attendus retrouvés parmi les *k* résultats. |
+| Recherche | **MRR** | 1 / rang du premier bon événement (1 = trouvé en tête). |
+| Réponse | **Couverture des éléments clés** | Part des éléments clés présents dans la réponse (insensible aux accents, « 14h00 » = « 14h », « 19 € » = « 19 euros »). |
+| Réponse | **Similarité sémantique** | Cosinus entre les embeddings (`embeddinggemma`) de la réponse et de la référence. |
+| Réponse | **Refus correct** | Le chatbot dit « aucun événement » quand c'est attendu, et seulement dans ce cas. |
+
+#### Lancer l'évaluation
+
+```powershell
+python -m script.evaluation                    # recherche + génération (environ 1 à 2 min sur CPU)
+python -m script.evaluation --sans-generation  # recherche seule (quelques secondes)
+```
+
+Les résultats sont enregistrés dans `evaluation/resultats/` : un CSV par lancement, avec pour chaque question la réponse générée, les événements trouvés et les notes. Les notes et leur moyenne s'affichent aussi dans le terminal.
+
+#### Résultats (13/11/2026, `qwen3:1.7b`, k = 5)
+
+| Question | Recall@5 | MRR | Couverture | Similarité | Refus correct |
+| --- | --- | --- | --- | --- | --- |
+| q01 enfant de 4 ans | 1,00 | 1,00 | 0,80 | 0,86 | oui |
+| q02 Nuit sans fin | 1,00 | 1,00 | 1,00 | 0,85 | oui |
+| q03 impro ce soir | **0,25** | 0,25 | 0,67 | 0,77 | oui |
+| q04 concert de Noël | 1,00 | 1,00 | **0,25** | 0,68 | oui |
+| q05 Lyon | – | – | – | 0,53 | **non** |
+| **Global** | **0,81** | **0,81** | **0,68** | **0,74** | **4 / 5** |
+
+Temps moyens : 2,2 s pour la recherche, 14,1 s pour la génération.
+
+**Lecture**
+
+- **La recherche fonctionne quand le sens suffit** (q01, q02, q04 : tous les événements attendus sont retrouvés, le premier est le bon). Elle échoue quand la question repose sur un mot précis : pour « improvisation » (q03), elle ne retrouve qu'un spectacle sur quatre et ramène des spectacles en général.
+- **Le LLM peut mélanger les événements** (q04) : il invente un « Concert de Noël » au Warehouse, en accolant le titre d'un événement au lieu et au prix d'un autre, avec un jour erroné (« samedi 20/11 »). La couverture (0,25) signale cette erreur, alors que la recherche avait trouvé le bon concert.
+- **Le chatbot ne sait pas dire « je n'ai rien »** (q05) : il reçoit toujours 5 événements et propose des événements nantais pour une question sur Lyon.
+- **Limite de la mesure** : 5 questions donnent une première tendance, pas une mesure stable. La couverture est une mesure lexicale : elle ne détecte pas toutes les hallucinations, d'où l'intérêt d'un LLM juge (voir les limites).
 
 ## Limites du projet
 
 | Limite | Piste d'amélioration |
 | --- | --- |
-| **Pas d'évaluation de la qualité** : la pertinence des résultats n'a pas été mesurée sur un jeu de questions métier. | Écrire une vingtaine de questions types avec les événements attendus, puis calculer Recall@k et Precision@k. Utiliser un LLM « juge » pour noter la fidélité des réponses (ex. RAGAS). |
+| **Évaluation encore partielle** : 5 questions annotées, une mesure de réponse lexicale (couverture) et une similarité d'embeddings. La fidélité aux sources n'est pas notée directement. | Ajouter un LLM « juge » (RAGAS : *faithfulness*, *answer relevancy*). Enrichir le jeu de test (questions de suivi, fautes de frappe, autres villes). Lancer `--sans-generation` dans la CI pour suivre le Recall@k à chaque modification. |
+| **Pas de refus quand rien ne correspond** : le chatbot reçoit toujours *k* événements et en propose même s'ils sont hors sujet (ex. « événements à Lyon »). | Ne pas envoyer au LLM les événements dont le score de similarité est sous un seuil, réglé sur le jeu de test. Ajouter au prompt : « si aucun événement ne correspond, ou si la ville n'est pas Nantes, dis-le ». |
+| **Mélange d'événements par le LLM** : `qwen3:1.7b` peut accoler le titre d'un événement au lieu ou au prix d'un autre. | Vérifier après génération que chaque titre cité existe dans le contexte. Tester `qwen3:4b`. |
+| **Recherche purement sémantique** : les mots exacts (« impro », sigle « ONPL ») pèsent peu dans l'embedding. | Recherche hybride BM25 + FAISS (`EnsembleRetriever`), ou récupérer 20 candidats et les reclasser avec un cross-encoder. |
 | **Dates mal comprises par la recherche** : FAISS cherche par sens, pas par date. Une question comme « ce week-end » peut faire remonter des événements à d'autres dates. | Extraire la période de la question (« ce week-end » → samedi-dimanche), puis filtrer sur les métadonnées `start_date` / `end_date` avant ou après la recherche FAISS. |
 | **Couverture limitée** : une seule ville (Nantes) et un plafond de 10 000 événements. | Rendre la ville paramétrable dans l'interface, ajouter `location_city` en filtre de métadonnées et augmenter `API_MAX_RECORDS`. Au-delà de 100 000 événements, passer à un index `IndexHNSW` ou à une base comme Weaviate ou Milvus. |
 | **Données figées** : l'index n'est pas mis à jour automatiquement. Le reconstruire oblige à recalculer tous les embeddings. | Planifier la collecte chaque nuit (cron, GitHub Actions). Ne vectoriser que les nouveaux événements et les ajouter avec `add_documents`. Supprimer les événements passés grâce à leur `uid`. |

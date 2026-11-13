@@ -1,5 +1,7 @@
 """Interface web du chatbot : python -m streamlit run app.py"""
 
+import time
+
 import streamlit as st
 
 from config import OLLAMA_CHAT_MODEL, OLLAMA_EMBEDDING_MODEL
@@ -39,14 +41,27 @@ def format_timings(timings):
     )
 
 
+DEFINITION_SIMILARITE = (
+    "**Similarité** : proximité de sens entre ta question et l'événement, de 0 (sans rapport) "
+    "à 1 (identique). C'est la similarité cosinus entre leurs deux vecteurs d'embedding. "
+    "Elle sert surtout à comparer les événements entre eux."
+)
+
+
+def show_sources(sources):
+    """Liste dépliable des événements consultés, suivie de la définition du score."""
+    with st.expander("Événements consultés"):
+        for source in sources:
+            st.markdown(source)
+        st.caption(DEFINITION_SIMILARITE)
+
+
 def show_message(message):
     """Affiche un message du chat, avec ses sources et ses temps s'il en a."""
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
         if message.get("sources"):
-            with st.expander("Événements consultés"):
-                for source in message["sources"]:
-                    st.markdown(source)
+            show_sources(message["sources"])
         if message.get("timings"):
             st.caption(format_timings(message["timings"]))
 
@@ -82,18 +97,29 @@ if question:
     st.session_state.messages.append(user_message)
     show_message(user_message)
 
-    with st.spinner("Recherche d'événements et rédaction de la réponse..."):
+    with st.chat_message("assistant"):
         try:
-            answer, documents, timings = chatbot.ask(question)
+            with st.spinner("Recherche d'événements..."):
+                flux, documents, temps_recherche = chatbot.ask_stream(question)
+            # La réponse s'affiche mot à mot dès que le modèle commence à écrire.
+            debut = time.perf_counter()
+            answer = st.write_stream(flux)
+            temps_generation = time.perf_counter() - debut
         except Exception as error:
             st.error(f"La réponse n'a pas pu être générée : {error}")
             st.stop()
 
-    assistant_message = {
-        "role": "assistant",
-        "content": answer,
-        "sources": format_sources(documents),
-        "timings": timings,
-    }
+        assistant_message = {
+            "role": "assistant",
+            "content": answer,
+            "sources": format_sources(documents),
+            "timings": {
+                "search": temps_recherche,
+                "generation": temps_generation,
+                "total": temps_recherche + temps_generation,
+            },
+        }
+        if assistant_message["sources"]:
+            show_sources(assistant_message["sources"])
+        st.caption(format_timings(assistant_message["timings"]))
     st.session_state.messages.append(assistant_message)
-    show_message(assistant_message)

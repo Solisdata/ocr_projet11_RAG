@@ -7,6 +7,7 @@ ces expressions en un intervalle de dates, appliqué sur les métadonnées.
 
 import json
 import re
+from functools import lru_cache
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -84,9 +85,17 @@ def lire_seances(metadata):
     On utilise le champ "timings" (une entrée par séance) ; s'il est absent, on se
     rabat sur la première et la dernière date, considérées comme une seule séance.
     """
+    return _lire_seances(
+        metadata.get("timings") or "", metadata.get("start_date", ""), metadata.get("end_date", "")
+    )
+
+
+# Le filtre parcourt les 10 000 événements à chaque question : on ne lit chaque JSON qu'une fois.
+@lru_cache(maxsize=None)
+def _lire_seances(timings_json, start_date, end_date):
     seances = []
     try:
-        timings = json.loads(metadata.get("timings") or "[]")
+        timings = json.loads(timings_json or "[]")
     except (TypeError, ValueError):
         timings = []
     for timing in timings if isinstance(timings, list) else []:
@@ -94,12 +103,12 @@ def lire_seances(metadata):
         if debut_seance:
             seances.append((debut_seance, lire_date(timing.get("end", "")) or debut_seance))
     if seances:
-        return seances
+        return tuple(seances)
 
-    debut_evt = lire_date(metadata.get("start_date", ""))
+    debut_evt = lire_date(start_date)
     if debut_evt is None:
-        return []
-    return [(debut_evt, lire_date(metadata.get("end_date", "")) or debut_evt)]
+        return ()
+    return ((debut_evt, lire_date(end_date) or debut_evt),)
 
 
 def seances_dans(metadata, debut, fin):
