@@ -1,15 +1,9 @@
-"""Affiche la structure et des exemples d'un index FAISS local."""
+"""Affiche le contenu de l'index FAISS, sans appeler Ollama : python -m script.read_index"""
 
 import argparse
 from pathlib import Path
-import sys
 
 from langchain_community.vectorstores import FAISS
-
-# Quand ce fichier est lancé directement, Python place `script/` (et non la
-# racine du projet) dans sys.path. L'ajout est inutile avec `python -m`.
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import FAISS_INDEX_PATH
 

@@ -19,7 +19,8 @@ from config import (
 
 EVENT_FIELDS = (
     "title_fr,description_fr,conditions_fr,location_name,location_address,"
-    "location_city,firstdate_begin,lastdate_end,age_min,age_max,canonicalurl,uid"
+    "location_city,firstdate_begin,lastdate_end,age_min,age_max,canonicalurl,uid,"
+    "timings"  # liste JSON des séances : [{"begin": ..., "end": ...}, ...]
 )
 
 

@@ -1,95 +1,100 @@
-"""Prépare les événements comme documents et les indexe dans FAISS."""
-#Lancer le script : python -m script.embeddings
-
-import os
+"""Transforme les événements en vecteurs et les enregistre dans FAISS : python -m script.embeddings"""
 
 import pandas as pd
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
-from langchain_mistralai import MistralAIEmbeddings
+from langchain_ollama import OllamaEmbeddings
 
-from config import CLEANED_DATA_PATH, FAISS_INDEX_PATH
+from config import (
+    CLEANED_DATA_PATH,
+    FAISS_INDEX_PATH,
+    OLLAMA_BASE_URL,
+    OLLAMA_EMBEDDING_MODEL,
+)
 
-#vectorisation
+TAILLE_LOT = 32  # événements envoyés à Ollama à la fois (réduire si Ollama manque de mémoire)
 
 
 def load_events(input_path=CLEANED_DATA_PATH):
-    """Charge le CSV cleané et le convertit en DataFrame Pandas."""
+    """Étape 1 : lire le CSV nettoyé."""
     if not input_path.exists():
-        raise FileNotFoundError(
-            f"Fichier absent : {input_path}. Lance d'abord le prétraitement."
-        )
-    events = pd.read_csv(input_path, encoding="utf-8-sig").fillna("")
+        raise FileNotFoundError(f"Fichier absent : {input_path}. Lance d'abord le prétraitement.")
+
+    events = pd.read_csv(input_path, encoding="utf-8-sig", dtype=str).fillna("")
     if events.empty:
         raise ValueError(f"Aucun événement à vectoriser dans {input_path}.")
     return events
 
 
 def create_event_documents(events):
-    """Crée un document par ligne du CSV."""
+    """Étape 2 : créer un document par événement (un événement = un vecteur)."""
     documents = []
-    for _, event in events.iterrows():
-        # On met les informations utiles dans le texte transmis au modèle.
-        age_min = str(event.get("age_min", "")).strip()
-        age_max = str(event.get("age_max", "")).strip()
-        age_range = str(event.get("age_range", "")).strip()
 
-        text_parts = [
+    for event in events.fillna("").astype(str).to_dict(orient="records"):
+        # Le texte qui sera vectorisé : tout ce qui décrit l'événement.
+        champs = [
             ("Événement", event.get("title_fr", "")),
             ("Description", event.get("description_fr", "")),
             ("Conditions", event.get("conditions_fr", "")),
             ("Lieu", event.get("location_name", "")),
             ("Adresse", event.get("location_address", "")),
             ("Ville", event.get("location_city", "")),
-            ("Âge conseillé", age_range),
-            (
-                "Dates",
-                f"{event.get('firstdate_begin', '')} - {event.get('lastdate_end', '')}",
-            ),
+            ("Âge conseillé", event.get("age_range", "")),
+            ("Dates", f"{event.get('firstdate_begin', '')} - {event.get('lastdate_end', '')}"),
         ]
-        page_content = "\n".join(
-            f"{label} : {value}"
-            for label, value in text_parts
-            if str(value).strip(" -")
+        contenu = "\n".join(
+            f"{label} : {valeur.strip()}" for label, valeur in champs if valeur.strip(" -")
         )
+        if not contenu:
+            continue
 
-
+        # Les métadonnées ne sont pas vectorisées : elles servent à afficher les sources.
         metadata = {
-            "uid": str(event.get("uid", "")),
-            "title": str(event.get("title_fr", "")),
-            "city": str(event.get("location_city", "")),
-            "start_date": str(event.get("firstdate_begin", "")),
-            "end_date": str(event.get("lastdate_end", "")),
-            "age_min": age_min,
-            "age_max": age_max,
-            "url": str(event.get("canonicalurl", "")),
+            "uid": event.get("uid", ""),
+            "title": event.get("title_fr", ""),
+            "city": event.get("location_city", ""),
+            "start_date": event.get("firstdate_begin", ""),
+            "end_date": event.get("lastdate_end", ""),
+            "age_min": event.get("age_min", ""),
+            "age_max": event.get("age_max", ""),
+            "url": event.get("canonicalurl", ""),
+            # Séances réelles (JSON) : un atelier "de septembre à décembre" n'a lieu que certains jours.
+            "timings": event.get("timings", ""),
         }
-        if page_content.strip():
-            documents.append(Document(page_content=page_content, metadata=metadata))
+        documents.append(Document(page_content=contenu, metadata=metadata))
+
     return documents
 
-#embeddings et vectore store 
+
+def create_embeddings():
+    """Étape 3 : le modèle Ollama qui transforme un texte en vecteur."""
+    return OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
+
+
 def build_vector_store(documents, index_path=FAISS_INDEX_PATH):
-    """Crée les embeddings Mistral et enregistre l'index de recherche FAISS."""
-    if not os.getenv("MISTRAL_API_KEY", "").strip():
-        raise EnvironmentError(
-            "La variable MISTRAL_API_KEY manque dans le fichier .env."
-        )
+    """Étape 4 : vectoriser les documents par lots et enregistrer l'index FAISS."""
     if not documents:
         raise ValueError("Aucun document valide à vectoriser.")
 
-    # Le modèle transforme le texte de chaque événement en vecteur numérique.
-    embeddings = MistralAIEmbeddings(model="mistral-embed")
-    vector_store = FAISS.from_documents(documents, embeddings)
+    embeddings = create_embeddings()
+    index = None
 
-    # FAISS écrit ses fichiers dans le dossier de l'index.
+    # Envoyer les 10 000 événements d'un coup peut faire planter Ollama : on procède par lots.
+    for debut in range(0, len(documents), TAILLE_LOT):
+        lot = documents[debut : debut + TAILLE_LOT]
+        index_du_lot = FAISS.from_documents(lot, embeddings)
+        if index is None:
+            index = index_du_lot
+        else:
+            index.merge_from(index_du_lot)
+        print(f"Embeddings créés : {debut + len(lot)} / {len(documents)}", flush=True)
+
     index_path.mkdir(parents=True, exist_ok=True)
-    vector_store.save_local(str(index_path))
-    return vector_store
+    index.save_local(str(index_path))
+    return index
 
 
 def main():
-    """Lit le CSV et construit l'index vectoriel complet."""
     events = load_events()
     documents = create_event_documents(events)
     build_vector_store(documents)

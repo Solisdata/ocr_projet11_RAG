@@ -1,0 +1,110 @@
+{
+  "description": "Jeu de test annoté (5 questions) pour évaluer le chatbot RAG (événements de Nantes). Chaque question a une réponse de référence rédigée à la main à partir du CSV nettoyé.",
+  "version": "1.0",
+  "date_annotation": "2026-11-13",
+  "source": "data/evenements_nantes_clean.csv",
+  "champs": {
+    "id": "Identifiant unique de la question.",
+    "categorie": "periode_et_theme | public | evenement_precis | hors_corpus.",
+    "question": "Question posée au chatbot, telle qu'un utilisateur l'écrirait.",
+    "date_reference": "Date et heure simulées de la question (« maintenant ») : les réponses dépendent du jour.",
+    "periode_attendue": "Période que doit détecter script/periode.py (null si aucune).",
+    "uids_attendus": "uid des événements pertinents (vérité terrain pour Recall@k / Precision@k). Vide si aucun événement ne doit être proposé.",
+    "reponse_attendue": "Réponse de référence annotée, dans le format demandé au LLM (3 suggestions au maximum).",
+    "elements_cles": "Informations qui doivent apparaître dans la réponse (titre, jour, horaire, lieu, prix).",
+    "doit_refuser": "true si le bon comportement est de dire qu'aucun événement ne correspond."
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "categorie": "public",
+      "question": "Que faire ce week-end avec un enfant de 4 ans ?",
+      "date_reference": "2026-11-13T10:00:00+01:00",
+      "periode_attendue": "ce week-end",
+      "uids_attendus": [
+        "67479279",
+        "8623780",
+        "41506315"
+      ],
+      "reponse_attendue": "- Animation enfants au Château des ducs de Bretagne (4 à 6 ans) : chasse aux œufs de dragons dans le musée, samedi 14/11/2026 de 10h45 à 12h15.\n- À la recherche des arcs-en-ciel (2/4 ans) : visite guidée en famille au Musée d'arts de Nantes, dimanche 15/11/2026 de 11h15 à 12h00, sur réservation (6 € / 4 € / 2,5 €).\n- Gabilolo et la hotte du Père Noël (2 à 8 ans) : spectacle jeune public au Théâtre de Jeanne, dimanche 15/11/2026 de 15h00 à 15h50, de 10 à 12 €.",
+      "elements_cles": [
+        "Château des ducs",
+        "arcs-en-ciel",
+        "Gabilolo",
+        "14/11",
+        "15/11"
+      ],
+      "doit_refuser": false
+    },
+    {
+      "id": "q02",
+      "categorie": "evenement_precis",
+      "question": "Comment participer à la Nuit sans fin consacrée à Steve Reich au Conservatoire ?",
+      "date_reference": "2026-11-13T10:00:00+01:00",
+      "periode_attendue": null,
+      "uids_attendus": [
+        "1292902",
+        "76485148",
+        "22530552",
+        "98236500"
+      ],
+      "reponse_attendue": "La Nuit sans fin a lieu samedi 14/11/2026 au Conservatoire de Nantes (4 rue Gaëtan Rondeau) :\n- Créneau A de 17h00 à 20h00 ou créneau B de 20h00 à minuit : gratuits, sur réservation en ligne.\n- Concert « Music for 18 musicians » de Steve Reich à 19h00 et à 21h00 : billetterie en ligne et au guichet (9 € / 3 € / gratuité selon conditions).\nL'exposition « Steve Reich, le minimalisme et son héritage » (gratuite) permet de s'y préparer.",
+      "elements_cles": [
+        "14/11",
+        "Conservatoire",
+        "réservation",
+        "Music for 18 musicians"
+      ],
+      "doit_refuser": false
+    },
+    {
+      "id": "q03",
+      "categorie": "periode_et_theme",
+      "question": "Un spectacle d'improvisation ce soir ?",
+      "date_reference": "2026-11-13T10:00:00+01:00",
+      "periode_attendue": "aujourd'hui",
+      "uids_attendus": [
+        "50315769",
+        "64486904",
+        "14955474",
+        "84244488"
+      ],
+      "reponse_attendue": "- Le Tapissage (Les Complices Impro) : Mystère Impro Club (9 rue Paré), vendredi 13/11/2026 de 19h00 à 20h30, 5 € + prix libre à la sortie.\n- Match d'impro professionnel LINA x LNI (Québec) : Maison de Quartier de Doulon, vendredi 13/11/2026 de 20h30 à 23h30, de 19 à 25 €.\n- Rien que pour vous (Alexis & Trem) : Mystère Comedy Club, vendredi 13/11/2026 de 21h00 à 22h15, sur réservation + prix libre.",
+      "elements_cles": [
+        "13/11",
+        "Mystère",
+        "Doulon"
+      ],
+      "doit_refuser": false
+    },
+    {
+      "id": "q04",
+      "categorie": "periode_et_theme",
+      "question": "Y a-t-il un concert de Noël le week-end prochain ?",
+      "date_reference": "2026-11-13T10:00:00+01:00",
+      "periode_attendue": "week-end prochain",
+      "uids_attendus": [
+        "34650300"
+      ],
+      "reponse_attendue": "Concert de Noël de l'Ensemble vocal de Nantes (chants de Noël, Bach, Haendel...) à l'église Notre-Dame de Bon Port (2 rue Damrémont), dimanche 22/11/2026 de 17h00 à 18h30.",
+      "elements_cles": [
+        "Ensemble vocal",
+        "Bon Port",
+        "22/11",
+        "17h"
+      ],
+      "doit_refuser": false
+    },
+    {
+      "id": "q05",
+      "categorie": "hors_corpus",
+      "question": "Quels événements sont prévus à Lyon ce week-end ?",
+      "date_reference": "2026-11-13T10:00:00+01:00",
+      "periode_attendue": "ce week-end",
+      "uids_attendus": [],
+      "reponse_attendue": "Je n'ai aucun événement à Lyon : les événements disponibles concernent uniquement Nantes.",
+      "elements_cles": [],
+      "doit_refuser": true
+    }
+  ]
+}

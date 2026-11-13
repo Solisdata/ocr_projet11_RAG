@@ -3,7 +3,6 @@ import os
 import pandas as pd
 import pytest
 from langchain_core.documents import Document
-from langchain_mistralai import MistralAIEmbeddings
 
 from script import embeddings
 from script.embeddings import create_event_documents
@@ -28,18 +27,14 @@ def test_create_event_documents_creates_one_document_per_csv_row():
 
 def test_build_vector_store_creates_faiss_index(tmp_path, monkeypatch):
     class FakeEmbeddings:
-        def __init__(self, model):
-            self.model = model
-
         def embed_documents(self, texts):
             return [[float(len(text)), 1.0] for text in texts]
 
         def embed_query(self, text):
             return [float(len(text)), 1.0]
 
-    monkeypatch.setenv("MISTRAL_API_KEY", "test-key")
-    monkeypatch.setattr(embeddings, "MistralAIEmbeddings", FakeEmbeddings)
-    documents = [Document(page_content="Concert à Nantes", metadata={"uid": "1"})]
+    monkeypatch.setattr(embeddings, "create_embeddings", FakeEmbeddings)
+    documents = [Document(page_content="Concert a Nantes", metadata={"uid": "1"})]
 
     vector_store = embeddings.build_vector_store(documents, tmp_path)
 
@@ -48,18 +43,19 @@ def test_build_vector_store_creates_faiss_index(tmp_path, monkeypatch):
     assert (tmp_path / "index.pkl").exists()
 
 
-def get_mistral_embeddings():
-    if not os.getenv("MISTRAL_API_KEY", "").strip():
-        pytest.skip("La clé MISTRAL_API_KEY n'est pas définie.")
-    return MistralAIEmbeddings(model="mistral-embed")
+def get_ollama_embeddings():
+    try:
+        return embeddings.create_embeddings()
+    except RuntimeError as error:
+        pytest.skip(str(error))
 
 
 @pytest.mark.skipif(
-    os.getenv("RUN_MISTRAL_INTEGRATION") != "1",
-    reason="Définir RUN_MISTRAL_INTEGRATION=1 pour appeler l'API Mistral.",
+    os.getenv("RUN_OLLAMA_INTEGRATION") != "1",
+    reason="Set RUN_OLLAMA_INTEGRATION=1 to call the local Ollama service.",
 )
-def test_mistral_returns_embedding_vector():
-    vector = get_mistral_embeddings().embed_query("Un événement culturel à Nantes")
+def test_ollama_returns_embedding_vector():
+    vector = get_ollama_embeddings().embed_query("Un evenement culturel a Nantes")
 
     assert isinstance(vector, list)
     assert vector
@@ -67,12 +63,12 @@ def test_mistral_returns_embedding_vector():
 
 
 @pytest.mark.skipif(
-    os.getenv("RUN_MISTRAL_INTEGRATION") != "1",
-    reason="Définir RUN_MISTRAL_INTEGRATION=1 pour appeler l'API Mistral.",
+    os.getenv("RUN_OLLAMA_INTEGRATION") != "1",
+    reason="Set RUN_OLLAMA_INTEGRATION=1 to call the local Ollama service.",
 )
-def test_mistral_embeddings_have_consistent_dimensions():
-    vectors = get_mistral_embeddings().embed_documents(
-        ["Un concert à Nantes", "Une exposition à Nantes"]
+def test_ollama_embeddings_have_consistent_dimensions():
+    vectors = get_ollama_embeddings().embed_documents(
+        ["Un concert a Nantes", "Une exposition a Nantes"]
     )
 
     assert len(vectors) == 2
