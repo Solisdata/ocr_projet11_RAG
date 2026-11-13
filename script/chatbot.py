@@ -1,190 +1,180 @@
-"""Local event chatbot: FAISS retrieval plus Ollama chat generation."""
+"""Chatbot RAG : recherche dans FAISS puis réponse rédigée par Ollama : python -m script.chatbot"""
 
-import argparse
-from pathlib import Path
-import sys
 import time
-
-if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from datetime import datetime, timedelta
 
 from langchain_community.vectorstores import FAISS
+from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from config import (
+    FAISS_INDEX_PATH,
     OLLAMA_BASE_URL,
     OLLAMA_CHAT_MODEL,
     OLLAMA_EMBEDDING_MODEL,
-    OLLAMA_FAISS_INDEX_PATH,
+)
+from script.periode import FUSEAU, chevauche, detecter_periode, formater_jour, formater_seance, seances_dans
+
+NOMBRE_EVENEMENTS = 5  # nombre d'événements transmis au LLM (le "k" du top-k)
+TEMPERATURE = 0.2  # faible = réponses plus factuelles
+
+INSTRUCTIONS = """
+Tu es un assistant qui recommande des événements.
+La date du jour est {current_date} (fuseau Europe/Paris).
+{period}
+Les dates ont DÉJÀ été vérifiées : chaque événement fourni a au moins une séance
+pendant la période. N'écarte jamais un événement à cause de ses dates.
+Pour chaque suggestion, donne le jour et l'horaire indiqués dans "Séances".
+Réponds en français et choisis les événements qui correspondent le mieux au reste
+de la demande (lieu, public, type de sortie...).
+Utilise uniquement les informations des événements fournis. N'invente pas de détails.
+""".strip()
+
+PROMPT = ChatPromptTemplate.from_messages(
+    [
+        ("system", INSTRUCTIONS + "\n\nÉvénements trouvés :\n{context}"),
+        ("human", "{question}"),
+    ]
 )
 
 
-# Main settings to modify.
-NUMBER_OF_EVENTS = 5
-TEMPERATURE = 0.2
+def distance_to_similarity(distance):
+    """Convertit la distance FAISS en similarité cosinus (1 = identique, 0 = sans rapport).
 
-INSTRUCTIONS = """
-Tu es un assistant qui recommande des \u00e9v\u00e9nements.
-R\u00e9ponds en fran\u00e7ais et adapte tes suggestions \u00e0 la demande.
-Utilise uniquement les informations des \u00e9v\u00e9nements fournis.
-Si les informations ne suffisent pas, dis-le. N'invente pas de d\u00e9tails.
-""".strip()
+    L'index (IndexFlatL2) renvoie la distance euclidienne AU CARRÉ : plus elle est
+    petite, plus l'événement est proche. Les vecteurs d'embeddinggemma étant
+    normalisés (longueur 1), on a : distance² = 2 - 2 × cosinus.
+    """
+    return max(0.0, 1 - float(distance) / 2)
 
 
-def create_prompt():
-    """Prepare the system instructions, event context, and user question."""
-    return ChatPromptTemplate.from_messages(
-        [
-            ("system", INSTRUCTIONS + "\n\n\u00c9v\u00e9nements trouv\u00e9s :\n{context}"),
-            ("human", "{question}"),
-        ]
+def contexte_evenement(document, debut, fin, periode_demandee, max_seances=5):
+    """Texte de l'événement + ses séances dans la période, en clair (le LLM n'a pas à lire du JSON)."""
+    seances = seances_dans(document.metadata, debut, fin)
+    if not seances:
+        return document.page_content
+    titre = "Séances pendant la période demandée" if periode_demandee else "Prochaines séances"
+    lignes = [f"- {formater_seance(d, f)}" for d, f in seances[:max_seances]]
+    if len(seances) > max_seances:
+        lignes.append(f"- ... et {len(seances) - max_seances} autre(s)")
+    # La ligne "Dates : <ISO UTC> - <ISO UTC>" (début et fin de toute la série) fait croire
+    # aux petits modèles que l'événement est hors période : on la remplace par les séances.
+    texte = "\n".join(
+        ligne for ligne in document.page_content.splitlines() if not ligne.startswith("Dates :")
     )
+    return f"{texte}\n{titre} :\n" + "\n".join(lignes)
 
 
 class EventChatbot:
-    """Search the local FAISS index and ask a local Ollama model to answer."""
+    """Assemble les quatre briques du RAG : index, recherche, LLM, chaîne."""
 
-    def __init__(
-        self,
-        index_path=OLLAMA_FAISS_INDEX_PATH,
-        k=NUMBER_OF_EVENTS,
-        model_name=OLLAMA_CHAT_MODEL,
-    ):
-        index_path = Path(index_path).resolve()
-        if not (index_path / "index.faiss").is_file() or not (
-            index_path / "index.pkl"
-        ).is_file():
+    def __init__(self, model_name=OLLAMA_CHAT_MODEL, k=NOMBRE_EVENEMENTS, index_path=FAISS_INDEX_PATH):
+        if not (index_path / "index.faiss").exists():
             raise FileNotFoundError(
-                f"Index FAISS Ollama introuvable dans {index_path}. "
-                "Lance d'abord : python -m script.embeddings"
+                f"Index FAISS introuvable dans {index_path}. Lance d'abord : python -m script.embeddings"
             )
 
-        try:
-            from langchain_ollama import ChatOllama, OllamaEmbeddings
-        except ImportError as error:
-            raise RuntimeError(
-                "Installe les d\u00e9pendances : python -m pip install -r requirements.txt"
-            ) from error
-
-        # The query and indexed documents must use the same embedding model.
-        embeddings = OllamaEmbeddings(
-            model=OLLAMA_EMBEDDING_MODEL,
-            base_url=OLLAMA_BASE_URL,
-        )
-        try:
-            query_dimension = len(embeddings.embed_query("v\u00e9rification"))
-        except Exception as error:
-            raise RuntimeError(
-                "Ollama est inaccessible ou le mod\u00e8le d'embedding est absent. "
-                "D\u00e9marre Ollama, puis lance : "
-                f"ollama pull {OLLAMA_EMBEDDING_MODEL}"
-            ) from error
-
-        # Keep the existing Mistral index untouched; this branch uses its own.
-        self.index = FAISS.load_local(
+        # 1. Charger l'index, avec le même modèle d'embedding que celui qui l'a créé.
+        embeddings = OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL)
+        index = FAISS.load_local(
             str(index_path),
             embeddings,
-            allow_dangerous_deserialization=True,
+            allow_dangerous_deserialization=True,  # index.pkl est créé par notre propre pipeline
         )
-        if self.index.index.d != query_dimension:
-            raise RuntimeError(
-                "L'index n'utilise pas le mod\u00e8le d'embedding Ollama configur\u00e9. "
-                "Reconstruis-le avec : python -m script.embeddings"
-            )
 
-        self.retriever = self.index.as_retriever(search_kwargs={"k": k})
-        try:
-            self.model = ChatOllama(
-                model=model_name,
-                base_url=OLLAMA_BASE_URL,
-                temperature=TEMPERATURE,
-                validate_model_on_init=True,
-            )
-        except Exception as error:
-            raise RuntimeError(
-                "Ollama est inaccessible ou le mod\u00e8le de chat est absent. "
-                "D\u00e9marre Ollama, puis lance : "
-                f"ollama pull {model_name}"
-            ) from error
+        # 2. La recherche : on garde l'index pour obtenir les k événements les plus
+        #    proches de la question ET leur score de similarité.
+        self.index = index
+        self.k = k
 
-        self.chain = create_prompt() | self.model | StrOutputParser()
+        # 3. Le LLM local qui rédige la réponse.
+        llm = ChatOllama(model=model_name, base_url=OLLAMA_BASE_URL, temperature=TEMPERATURE)
+
+        # 4. La chaîne : prompt rempli -> LLM -> texte.
+        self.chain = PROMPT | llm | StrOutputParser()
 
     def ask(self, question):
-        """Return the answer and the FAISS documents used as sources."""
-        question = question.strip()
-        if not question:
-            raise ValueError("\u00c9cris une question avant de l'envoyer.")
-
-        answer, documents, _ = self.ask_with_timings(question)
-        return answer, documents
-
-    def ask_with_timings(self, question):
-        """Return the answer, sources, and time spent in each main step."""
+        """Renvoie la réponse, les événements utilisés et le temps de chaque étape."""
         question = question.strip()
         if not question:
             raise ValueError("Écris une question avant de l'envoyer.")
 
-        # Includes converting the question to an embedding and searching FAISS.
-        search_started_at = time.perf_counter()
-        documents = self.retriever.invoke(question)
-        search_time = time.perf_counter() - search_started_at
+        # Filtre par date : l'embedding ne comprend pas "ce week-end", on filtre donc
+        # sur les dates des métadonnées. Sans période citée, on écarte les événements passés.
+        maintenant = datetime.now(FUSEAU)
+        periode = detecter_periode(question, maintenant)
+        if periode:
+            nom, debut_periode, fin_periode, expression = periode
+            texte_recherche = question.replace(expression, " ").strip(" ?!.,") or question
+            consigne_periode = (
+                f'Période demandée ("{nom}") : du {formater_jour(debut_periode)} '
+                f"au {formater_jour(fin_periode - timedelta(seconds=1))} inclus."
+            )
+        else:
+            debut_periode, fin_periode = maintenant, datetime.max.replace(tzinfo=FUSEAU)
+            texte_recherche = question
+            consigne_periode = "Aucune période précise demandée : propose les prochaines séances."
 
-        context = "\n\n---\n\n".join(doc.page_content for doc in documents)
-        generation_started_at = time.perf_counter()
-        answer = self.chain.invoke({"question": question, "context": context})
-        generation_time = time.perf_counter() - generation_started_at
+        def filtre_dates(metadata):
+            return chevauche(metadata, debut_periode, fin_periode)
+
+        # Retrieval : la question est vectorisée puis comparée à TOUT l'index FAISS
+        # (fetch_k = taille de l'index), on ne garde que les k meilleurs dans la période.
+        debut = time.perf_counter()
+        resultats = self.index.similarity_search_with_score(
+            texte_recherche, k=self.k, filter=filtre_dates, fetch_k=self.index.index.ntotal
+        )
+        documents = [
+            Document(
+                page_content=doc.page_content,
+                metadata={**doc.metadata, "score": distance_to_similarity(distance)},
+            )
+            for doc, distance in resultats
+        ]
+        temps_recherche = time.perf_counter() - debut
+
+        # Generation : le LLM répond à partir des événements trouvés.
+        debut = time.perf_counter()
+        answer = self.chain.invoke(
+            {
+                "question": question,
+                "context": "\n\n---\n\n".join(
+                    contexte_evenement(doc, debut_periode, fin_periode, bool(periode)) for doc in documents
+                ),
+                "current_date": formater_jour(maintenant),
+                "period": consigne_periode,
+            }
+        )
+        temps_generation = time.perf_counter() - debut
 
         timings = {
-            "search": search_time,
-            "generation": generation_time,
-            "total": search_time + generation_time,
+            "search": temps_recherche,
+            "generation": temps_generation,
+            "total": temps_recherche + temps_generation,
         }
         return answer, documents, timings
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Chatbot local de recommandations d'\u00e9v\u00e9nements"
-    )
-    parser.add_argument("--index-path", default=str(OLLAMA_FAISS_INDEX_PATH))
-    parser.add_argument("--k", type=int, default=NUMBER_OF_EVENTS)
-    parser.add_argument("--model", default=OLLAMA_CHAT_MODEL)
-    args = parser.parse_args()
+    """Petit chat dans le terminal. Tape 'q' pour quitter."""
+    chatbot = EventChatbot()
+    print("Pose une question sur les événements. Tape 'q' pour quitter.\n")
 
-    if args.k < 1:
-        parser.error("--k doit \u00eatre sup\u00e9rieur ou \u00e9gal \u00e0 1.")
-
-    try:
-        chatbot = EventChatbot(args.index_path, k=args.k, model_name=args.model)
-    except (FileNotFoundError, RuntimeError) as error:
-        parser.exit(1, f"Erreur : {error}\n")
-
-    print("Pose une question sur les \u00e9v\u00e9nements. Tape 'q' pour quitter.\n")
     while True:
-        try:
-            question = input("Vous : ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\n\u00c0 bient\u00f4t !")
-            break
-
+        question = input("Vous : ").strip()
         if question.lower() in {"q", "quit", "exit"}:
-            print("\u00c0 bient\u00f4t !")
+            print("À bientôt !")
             break
         if not question:
             continue
 
-        try:
-            answer, documents = chatbot.ask(question)
-            print(f"\nAssistant : {answer}")
-            for document in documents:
-                title = document.metadata.get("title", "").strip()
-                url = document.metadata.get("url", "").strip()
-                if title or url:
-                    print(f"- {title} {url}".strip())
-            print()
-        except Exception as error:
-            print(f"Erreur : {error}\n")
+        answer, documents, _ = chatbot.ask(question)
+        print(f"\nAssistant : {answer}\n")
+        for document in documents:
+            print(f"- {document.metadata.get('title', '')} {document.metadata.get('url', '')}")
+        print()
 
 
 if __name__ == "__main__":

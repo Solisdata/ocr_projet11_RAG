@@ -1,116 +1,99 @@
-"""Streamlit interface for the local Ollama event chatbot."""
-
-import time
+"""Interface web du chatbot : python -m streamlit run app.py"""
 
 import streamlit as st
 
-from config import OLLAMA_CHAT_MODEL, OLLAMA_FAISS_INDEX_PATH
+from config import OLLAMA_CHAT_MODEL, OLLAMA_EMBEDDING_MODEL
 from script.chatbot import EventChatbot
 
+st.set_page_config(page_title="Événements à Nantes", page_icon="🎭")
+st.title("Événements à Nantes")
+st.caption("Pose une question, je cherche les événements qui correspondent.")
 
-st.set_page_config(page_title="\u00c9v\u00e9nements \u00e0 Nantes", page_icon="\U0001f3ad")
-st.title("Evénements à Nantes")
-st.caption("Je recherche un évenement.")
+
+@st.cache_resource(show_spinner="Chargement de l'index FAISS et du modèle...")
+def get_chatbot(model_name):
+    """Crée le chatbot une seule fois, puis le réutilise à chaque question."""
+    return EventChatbot(model_name=model_name)
 
 
-@st.cache_resource(show_spinner="Chargement du mod\u00e8le local et de FAISS...")
-def get_chatbot(k, model_name):
-    return EventChatbot(
-        index_path=OLLAMA_FAISS_INDEX_PATH,
-        k=k,
-        model_name=model_name,
+def format_sources(documents):
+    """Liste les événements utilisés, avec leur score de similarité et un lien, sans doublon."""
+    sources = []
+    for document in documents:
+        title = document.metadata.get("title", "") or "Voir l'événement"
+        url = document.metadata.get("url", "")
+        score = document.metadata.get("score")
+        source = f"- [{title}]({url})" if url else f"- {title}"
+        if score is not None:
+            source += f" — similarité : **{score:.2f}**"
+        if source not in sources:
+            sources.append(source)
+    return sources
+
+
+def format_timings(timings):
+    return (
+        f"Recherche (embedding + FAISS) : {timings['search']:.2f} s · "
+        f"Réponse Ollama : {timings['generation']:.2f} s · "
+        f"Total : {timings['total']:.2f} s"
     )
 
 
+def show_message(message):
+    """Affiche un message du chat, avec ses sources et ses temps s'il en a."""
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if message.get("sources"):
+            with st.expander("Événements consultés"):
+                for source in message["sources"]:
+                    st.markdown(source)
+        if message.get("timings"):
+            st.caption(format_timings(message["timings"]))
+
+
+# --- Barre latérale : choix du modèle ---
 with st.sidebar:
-    st.header("Param\u00e8tres")
-    number_of_results = st.slider(
-        "\u00c9v\u00e9nements \u00e0 consulter", min_value=1, max_value=10, value=5
-    )
-    model_name = st.text_input("Mod\u00e8le de chat Ollama", value=OLLAMA_CHAT_MODEL)
-    st.caption("Le mod\u00e8le de chat et les embeddings tournent localement avec Ollama.")
-    st.code("ollama pull embeddinggemma\nollama pull " + model_name, language="powershell")
-    st.caption("Autres mod\u00e8les à tester dans un terminal :")
-    st.code(
-        "ollama run qwen3:8b  # polyvalent, excellent en multilingue\n"
-        "ollama run gpt-oss:20b  # raisonnement, si 16 Go de RAM/VRAM\n"
-        "ollama run mistral-small3.2  # option Mistral, open-weight",
-        language="powershell",
-    )
+    st.header("Paramètres")
+    model_name = st.text_input("Modèle de chat Ollama", value=OLLAMA_CHAT_MODEL)
+    st.caption("Les embeddings et le modèle de chat tournent en local avec Ollama.")
+    st.code(f"ollama pull {OLLAMA_EMBEDDING_MODEL}\nollama pull {model_name}", language="powershell")
 
 try:
-    chatbot = get_chatbot(number_of_results, model_name)
-except (FileNotFoundError, RuntimeError) as error:
+    chatbot = get_chatbot(model_name)
+except Exception as error:
     st.error(str(error))
     st.info(
-        "V\u00e9rifie qu'Ollama est d\u00e9marr\u00e9, que les mod\u00e8les sont t\u00e9l\u00e9charg\u00e9s "
-        "et que l'index a \u00e9t\u00e9 cr\u00e9\u00e9 avec python -m script.embeddings."
+        "Vérifie qu'Ollama est démarré, que les modèles sont téléchargés "
+        "et que l'index a été créé avec : python -m script.embeddings"
     )
     st.stop()
 
+# --- Historique de la conversation ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        for source in message.get("sources", []):
-            st.markdown(source)
-        if "search_time" in message and "generation_time" in message:
-            st.caption(
-                f"Recherche (embedding + FAISS) : {message['search_time']:.2f} s · "
-                f"Réponse Ollama : {message['generation_time']:.2f} s · "
-                f"Total : {message['processing_time']:.2f} s"
-            )
-        elif "processing_time" in message:
-            st.caption(f"Temps de traitement : {message['processing_time']:.2f} s")
+    show_message(message)
 
+# --- Nouvelle question ---
 question = st.chat_input("Ex. Une sortie gratuite ce week-end pour des enfants")
 if question:
-    st.session_state.messages.append({"role": "user", "content": question})
-    with st.chat_message("user"):
-        st.markdown(question)
+    user_message = {"role": "user", "content": question}
+    st.session_state.messages.append(user_message)
+    show_message(user_message)
 
-    with st.chat_message("assistant"):
-        with st.spinner("Recherche d'\u00e9v\u00e9nements et pr\u00e9paration de la r\u00e9ponse..."):
-            started_at = time.perf_counter()
-            try:
-                answer, documents, timings = chatbot.ask_with_timings(question)
-            except Exception as error:
-                processing_time = time.perf_counter() - started_at
-                st.error(f"La r?ponse n'a pas pu ?tre g?n?r?e : {error}")
-                st.caption(f"Temps avant l'erreur : {processing_time:.2f} s")
-            else:
-                processing_time = time.perf_counter() - started_at
-                st.markdown(answer)
-                sources = []
-                for document in documents:
-                    title = document.metadata.get("title", "").strip()
-                    url = document.metadata.get("url", "").strip()
-                    if url:
-                        source = f"- [{title or 'Voir l\u2019\u00e9v\u00e9nement'}]({url})"
-                    elif title:
-                        source = f"- {title}"
-                    else:
-                        continue
-                    if source not in sources:
-                        sources.append(source)
-                if sources:
-                    with st.expander("\u00c9v\u00e9nements consult\u00e9s"):
-                        for source in sources:
-                            st.markdown(source)
-                st.caption(
-                    f"Recherche (embedding + FAISS) : {timings['search']:.2f} s ? "
-                    f"R?ponse Ollama : {timings['generation']:.2f} s ? "
-                    f"Total : {processing_time:.2f} s"
-                )
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "sources": sources,
-                        "processing_time": processing_time,
-                        "search_time": timings["search"],
-                        "generation_time": timings["generation"],
-                    }
-                )
+    with st.spinner("Recherche d'événements et rédaction de la réponse..."):
+        try:
+            answer, documents, timings = chatbot.ask(question)
+        except Exception as error:
+            st.error(f"La réponse n'a pas pu être générée : {error}")
+            st.stop()
+
+    assistant_message = {
+        "role": "assistant",
+        "content": answer,
+        "sources": format_sources(documents),
+        "timings": timings,
+    }
+    st.session_state.messages.append(assistant_message)
+    show_message(assistant_message)
