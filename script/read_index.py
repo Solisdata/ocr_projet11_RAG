@@ -11,10 +11,10 @@ from langchain_community.vectorstores import FAISS
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config import FAISS_INDEX_PATH
+from config import OLLAMA_FAISS_INDEX_PATH
 
 
-def read_index(index_path=FAISS_INDEX_PATH, limit=5):
+def read_index(index_path=OLLAMA_FAISS_INDEX_PATH, limit=5):
     """Charge l'index sans appeler le fournisseur d'embeddings et affiche son contenu."""
     index_path = index_path.resolve()
     faiss_file = index_path / "index.faiss"
@@ -58,7 +58,7 @@ def main():
     )
     parser.add_argument(
         "--index-path",
-        default=str(FAISS_INDEX_PATH),
+        default=str(OLLAMA_FAISS_INDEX_PATH),
         help="Dossier contenant index.faiss et index.pkl.",
     )
     args = parser.parse_args()

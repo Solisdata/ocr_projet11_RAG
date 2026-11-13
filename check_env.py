@@ -7,8 +7,7 @@ import langchain
 import langchain_core
 import langchain_community
 import langchain_text_splitters
-import langchain_mistralai
-import mistralai
+import langchain_ollama
 import faiss
 import pandas
 import requests
@@ -16,7 +15,7 @@ import dotenv
 import pytest
 
 from langchain_community.vectorstores import FAISS
-from langchain_mistralai import ChatMistralAI, MistralAIEmbeddings
+from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 print("langchain :", langchain.__version__)

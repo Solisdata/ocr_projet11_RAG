@@ -8,7 +8,7 @@ Le pipeline suit trois étapes :
 
 1. `script/api_opendatasoft.py` récupère les événements et les enregistre dans `data/evenements_nantes.csv`.
 2. `script/preprocessing.py` nettoie les champs, normalise les âges, crée le libellé `age_range` et filtre les événements invalides, trop anciens ou hors de Nantes. Le résultat est enregistré dans `data/evenements_nantes_clean.csv`.
-3. `script/embeddings.py` transforme chaque ligne du CSV nettoyé en un document, puis crée un embedding avec Mistral et l’enregistre dans un index FAISS sous `data/faiss_index/`.
+3. `script/embeddings.py` transforme chaque ligne nettoyée en vecteur avec Ollama, puis enregistre un index FAISS local.
 
 Chaque ligne du CSV représente un événement et devient un document. Les métadonnées du document gardent notamment l’identifiant, le titre, les dates, l’âge et l’URL de l’événement.
 
@@ -22,10 +22,19 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-Ajouter la clé Mistral dans un fichier `.env` à la racine du projet :
+Installer Ollama pour Windows depuis https://ollama.com/download, puis télécharger les modèles :
+
+```powershell
+ollama pull embeddinggemma
+ollama pull qwen3:4b
+```
+
+EmbeddingGemma vectorise les événements et les questions. Qwen3 rédige les réponses. Ces valeurs peuvent être changées dans `.env` :
 
 ```text
-MISTRAL_API_KEY=ta_cle_api
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_EMBEDDING_MODEL=embeddinggemma
+OLLAMA_CHAT_MODEL=qwen3:4b
 ```
 
 Lancer toutes les étapes :
@@ -43,67 +52,53 @@ python -m script.embeddings
 ```
 
 Pour inspecter l'index FAISS local (nombre de vecteurs, dimension, métadonnées et
-contenu de quelques documents), sans appeler l'API Mistral :
+contenu de quelques documents), sans contacter Ollama :
 
 ```powershell
 python -m script.read_index
 python -m script.read_index --limit 10
 ```
 
-Le script lit `data/faiss_index/` par défaut. `index.pkl` est chargé avec
+Le script lit `data/faiss_index_ollama/` par défaut. `index.pkl` est chargé avec
 `pickle` par LangChain : n'inspecte que les index créés par ce projet ou dont
 la provenance est fiable.
 
 ## Chatbot de recommandations
 
-Après avoir créé l'index et configuré `MISTRAL_API_KEY`, lancer le chatbot :
+Après avoir installé Ollama et téléchargé les modèles, reconstruire l'index avec les embeddings Ollama :
+
+```powershell
+python -m script.embeddings
+```
+
+L'index Ollama est enregistré dans `data/faiss_index_ollama/`. L'ancien index `data/faiss_index/` reste intact. Un index créé avec Mistral ne peut pas servir avec les embeddings Ollama : il faut le reconstruire.
+
+Lancer le chatbot en terminal ou dans Streamlit :
 
 ```powershell
 python -m script.chatbot
-```
-
-Le chatbot récupère les cinq événements les plus proches dans FAISS, puis demande
-à Mistral de répondre à partir de leur contenu. Il affiche les événements consultés
-avec leurs liens disponibles. La conversation ne conserve pas d'historique. Pour
-changer le nombre de résultats, utiliser `--k 8`. Le modèle peut être choisi avec
-`--model nom-du-modele` ou la variable `MISTRAL_CHAT_MODEL` (défaut :
-`mistral-small-latest`). Chaque question déclenche des appels Mistral pour la
-recherche vectorielle et la génération de la réponse.
-
-### Interface web Streamlit
-
-Lancer l'interface depuis la racine du projet :
-
-```powershell
 python -m streamlit run app.py
 ```
 
-L'interface affiche les réponses avec les liens des événements consultés. Elle
-garde les échanges uniquement pendant la session Streamlit en cours. Le nombre
-d'événements utilisés pour la recherche se règle dans la barre latérale. Après
-l'ajout de Streamlit dans `requirements.txt`, installer la dépendance avec :
+Le chatbot recherche les événements dans FAISS puis envoie le contexte au modèle Ollama local. La barre latérale Streamlit permet de régler le nombre de résultats et le modèle de chat.
+
+La pipeline complète récupère toujours les événements depuis OpenDataSoft. La création des embeddings et les réponses tournent localement avec Ollama :
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m script.run_pipeline
 ```
-
-La création de l’index appelle l’API Mistral. Relancer cette étape recrée l’index et consomme des appels d’API.
 
 ## Tests
 
-Lancer tous les tests :
+Lancer les tests locaux :
 
 ```powershell
 python -m pytest tests/ -v
 ```
 
-`tests/test_embeddings.py` contient des tests locaux : un document est créé par ligne CSV et FAISS crée bien un index. Le test FAISS utilise un faux encodeur : il ne contacte pas Mistral.
-
-Les tests réels de Mistral sont désactivés par défaut. Ils vérifient qu’une requête retourne un vecteur numérique et que deux textes donnent des vecteurs de même dimension. Pour les activer dans PowerShell :
+Les tests d'embeddings utilisent un faux encodeur et ne nécessitent pas qu'Ollama soit démarré. Pour tester les embeddings réels, démarrer Ollama et télécharger `embeddinggemma`, puis lancer dans PowerShell :
 
 ```powershell
-$env:RUN_MISTRAL_INTEGRATION = "1"
+$env:RUN_OLLAMA_INTEGRATION = "1"
 python -m pytest tests/test_embeddings.py -v
 ```
-
-Ces tests nécessitent `MISTRAL_API_KEY` et font de vrais appels à l’API. Ils sont donc séparés des tests courants et de la CI.
