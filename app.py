@@ -93,6 +93,8 @@ for message in st.session_state.messages:
 # --- Nouvelle question ---
 question = st.chat_input("Ex. Une sortie gratuite ce week-end pour des enfants")
 if question:
+    # Mémoire : les échanges précédents (texte seul), avant d'ajouter la nouvelle question.
+    historique = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
     user_message = {"role": "user", "content": question}
     st.session_state.messages.append(user_message)
     show_message(user_message)
@@ -100,7 +102,7 @@ if question:
     with st.chat_message("assistant"):
         try:
             with st.spinner("Recherche d'événements..."):
-                flux, documents, temps_recherche = chatbot.ask_stream(question)
+                flux, documents, temps_recherche = chatbot.ask_stream(question, historique=historique)
             # La réponse s'affiche mot à mot dès que le modèle commence à écrire.
             debut = time.perf_counter()
             answer = st.write_stream(flux)

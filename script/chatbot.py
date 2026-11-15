@@ -1,12 +1,13 @@
 """Chatbot RAG : recherche dans FAISS puis réponse rédigée par Ollama : python -m script.chatbot"""
 
+import re
 import time
 from datetime import datetime, timedelta
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from config import (
@@ -31,16 +32,62 @@ Pour chaque suggestion, donne le jour et l'horaire indiqués dans "Séances".
 Réponds en français et choisis les événements qui correspondent le mieux au reste
 de la demande (lieu, public, type de sortie...).
 Utilise uniquement les informations des événements fournis. N'invente pas de détails.
-Sois concis : 3 suggestions au maximum, 2 ou 3 lignes chacune (nom, jour et horaire,
-lieu, prix si connu), sans longue introduction ni conclusion.
+Commence toujours par UNE courte phrase d'introduction, écrite avec tes propres mots
+et adaptée à la question, avant la liste.
+Puis sois concis : 3 suggestions au maximum, 2 ou 3 lignes chacune (nom, jour et horaire,
+lieu, prix si connu), sans conclusion.
 """.strip()
+
+# Rappelé juste avant la question quand il y a un historique : un petit modèle suit
+# mieux une consigne placée à côté de la question qu'en haut du prompt.
+CONSIGNE_RELANCE = (
+    "(Question de suivi sur les événements que tu viens de proposer. Réponds précisément "
+    "à cette question pour ces événements, sans recopier ta réponse précédente.)\n"
+)
 
 PROMPT = ChatPromptTemplate.from_messages(
     [
         ("system", INSTRUCTIONS + "\n\nÉvénements trouvés :\n{context}"),
-        ("human", "{question}"),
+        MessagesPlaceholder("history"),
+        ("human", "{relance}{question}"),
     ]
 )
+
+NOMBRE_MESSAGES_MEMOIRE = 4  # mémoire courte : les 2 derniers échanges (question + réponse)
+
+
+def preparer_historique(historique):
+    """Garde les derniers messages de la conversation au format attendu par LangChain."""
+    return [
+        ("human" if message["role"] == "user" else "ai", message["content"])
+        for message in (historique or [])[-NOMBRE_MESSAGES_MEMOIRE:]
+    ]
+
+
+# Une question de suivi est courte et renvoie à la réponse précédente ("c'est payant ?",
+# "et le premier ?", "à quelle heure ?"). Sinon, c'est une nouvelle demande.
+MOTS_RELANCE = re.compile(
+    r"^(et|où|quand|combien|comment|à quelle|a quelle|quel(le)? est)\b"
+    r"|\b(c'est|ça|cela|ceci|il|elle|ils|elles|y|celui|celle|ceux|lequel|laquelle"
+    r"|premier|première|deuxième|second|seconde|troisième|dernier|dernière)\b"
+)
+MAX_MOTS_RELANCE = 10
+
+
+def est_relance(question, historique):
+    """True si la question prolonge l'échange précédent, False si c'est une nouvelle demande."""
+    if not historique:
+        return False
+    texte = question.lower().replace("’", "'")
+    return len(texte.split()) <= MAX_MOTS_RELANCE and bool(MOTS_RELANCE.search(texte))
+
+
+def derniere_question(historique):
+    """Dernière question posée par l'utilisateur avant celle-ci (ou None)."""
+    for message in reversed(historique or []):
+        if message["role"] == "user":
+            return message["content"]
+    return None
 
 
 def distance_to_similarity(distance):
@@ -106,12 +153,13 @@ class EventChatbot:
         # 4. La chaîne : prompt rempli -> LLM -> texte.
         self.chain = PROMPT | llm | StrOutputParser()
 
-    def ask(self, question, maintenant=None):
+    def ask(self, question, maintenant=None, historique=None):
         """Renvoie la réponse, les événements utilisés et le temps de chaque étape.
 
         maintenant : date simulée de la question (utile pour l'évaluation) ; par défaut, l'heure actuelle.
+        historique : messages précédents [{"role": "user"|"assistant", "content": ...}].
         """
-        entrees, documents, temps_recherche = self.retrieve(question, maintenant)
+        entrees, documents, temps_recherche = self.retrieve(question, maintenant, historique)
 
         # Generation : le LLM répond à partir des événements trouvés.
         debut = time.perf_counter()
@@ -125,34 +173,43 @@ class EventChatbot:
         }
         return answer, documents, timings
 
-    def ask_stream(self, question):
+    def ask_stream(self, question, historique=None):
         """Comme ask, mais la réponse arrive morceau par morceau (affichage au fil de l'eau).
 
         Renvoie (flux de texte, événements utilisés, temps de recherche).
         """
-        entrees, documents, temps_recherche = self.retrieve(question)
+        entrees, documents, temps_recherche = self.retrieve(question, historique=historique)
         return self.chain.stream(entrees), documents, temps_recherche
 
-    def retrieve(self, question, maintenant=None):
+    def retrieve(self, question, maintenant=None, historique=None):
         """Recherche les événements et prépare les entrées du prompt."""
         question = question.strip()
         if not question:
             raise ValueError("Écris une question avant de l'envoyer.")
 
+        # Mémoire pour la recherche : une relance comme "c'est payant ?" ne dit rien du
+        # sujet. On cherche donc avec la question précédente + la nouvelle, ce qui
+        # retrouve les mêmes événements (et la même période) sans appel LLM en plus.
+        # Nouvelle demande (autre type d'événement) : on repart de zéro, sans historique.
+        if not est_relance(question, historique):
+            historique = None
+        precedente = derniere_question(historique)
+        texte_complet = f"{precedente} {question}" if precedente else question
+
         # Filtre par date : l'embedding ne comprend pas "ce week-end", on filtre donc
         # sur les dates des métadonnées. Sans période citée, on écarte les événements passés.
         maintenant = maintenant or datetime.now(FUSEAU)
-        periode = detecter_periode(question, maintenant)
+        periode = detecter_periode(question, maintenant) or detecter_periode(texte_complet, maintenant)
         if periode:
             nom, debut_periode, fin_periode, expression = periode
-            texte_recherche = question.replace(expression, " ").strip(" ?!.,") or question
+            texte_recherche = texte_complet.replace(expression, " ").strip(" ?!.,") or texte_complet
             consigne_periode = (
                 f'Période demandée ("{nom}") : du {formater_jour(debut_periode)} '
                 f"au {formater_jour(fin_periode - timedelta(seconds=1))} inclus."
             )
         else:
             debut_periode, fin_periode = maintenant, datetime.max.replace(tzinfo=FUSEAU)
-            texte_recherche = question
+            texte_recherche = texte_complet
             consigne_periode = "Aucune période précise demandée : propose les prochaines séances."
 
         def filtre_dates(metadata):
@@ -175,6 +232,8 @@ class EventChatbot:
 
         entrees = {
             "question": question,
+            "history": preparer_historique(historique),
+            "relance": CONSIGNE_RELANCE if precedente else "",
             "context": "\n\n---\n\n".join(
                 contexte_evenement(doc, debut_periode, fin_periode, bool(periode)) for doc in documents
             ),
@@ -188,6 +247,7 @@ def main():
     """Petit chat dans le terminal. Tape 'q' pour quitter."""
     chatbot = EventChatbot()
     print("Pose une question sur les événements. Tape 'q' pour quitter.\n")
+    historique = []
 
     while True:
         question = input("Vous : ").strip()
@@ -197,7 +257,8 @@ def main():
         if not question:
             continue
 
-        answer, documents, _ = chatbot.ask(question)
+        answer, documents, _ = chatbot.ask(question, historique=historique)
+        historique += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
         print(f"\nAssistant : {answer}\n")
         for document in documents:
             print(f"- {document.metadata.get('title', '')} {document.metadata.get('url', '')}")
