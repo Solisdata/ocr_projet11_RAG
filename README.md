@@ -44,8 +44,8 @@ projet_11/
 ├── docs/
 │   ├── architecture_RAG.png        # Schéma d'architecture : briques et outils du RAG
 │   ├── logigramme_RAG.png          # Logigramme : enchaînement des étapes et des scripts
-│   ├── ocr_projet11_RAG_v6.pptx    # Présentation du POC
-│   └── Rapport_technique_du_POC_RAG_MLS.pdf  # Rapport technique du POC
+│   ├── Lesolliec_Mathilde_5_presentation_102026.pdf    # Présentation du POC
+│   └── Lesolliec_Mathilde_5_rapporttechnique_102026.pdf  # Rapport technique du POC
 ├── script/
 │   ├── api_opendatasoft.py         # 1. Collecte paginée des événements
 │   ├── preprocessing.py            # 2. Nettoyage, normalisation, filtrage, dédoublonnage
